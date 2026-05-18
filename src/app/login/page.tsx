@@ -34,7 +34,7 @@ export default function LoginPage() {
             <p className="font-semibold">Kesiapan Data</p>
             <p className="mt-2 text-white/78">
               {isFirebaseConfigured
-                ? "Koneksi Firebase terdeteksi. Data kerja akan diambil dari Firestore."
+                ? "Koneksi Firebase terdeteksi. Data kerja akan diambil dari Realtime Database dan Firestore."
                 : "Firebase belum aktif penuh. Aplikasi akan tetap menampilkan data contoh agar alur halaman bisa dicek."}
             </p>
           </div>

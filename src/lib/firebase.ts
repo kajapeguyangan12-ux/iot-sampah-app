@@ -1,6 +1,7 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAnalytics, isSupported } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
+import { getDatabase } from "firebase/database";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -11,9 +12,21 @@ const firebaseConfig = {
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+  databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
 };
 
-export const isFirebaseConfigured = Object.values(firebaseConfig).every(Boolean);
+const requiredFirebaseConfig = {
+  apiKey: firebaseConfig.apiKey,
+  authDomain: firebaseConfig.authDomain,
+  projectId: firebaseConfig.projectId,
+  storageBucket: firebaseConfig.storageBucket,
+  messagingSenderId: firebaseConfig.messagingSenderId,
+  appId: firebaseConfig.appId,
+};
+
+export const isFirebaseConfigured = Object.values(requiredFirebaseConfig).every(Boolean);
+export const isRealtimeDatabaseConfigured =
+  isFirebaseConfigured && Boolean(firebaseConfig.databaseURL);
 
 const app = isFirebaseConfigured
   ? getApps().length
@@ -24,6 +37,8 @@ const app = isFirebaseConfigured
 export const firebaseApp = app;
 export const firebaseAuth = app ? getAuth(app) : null;
 export const firebaseDb = app ? getFirestore(app) : null;
+export const firebaseRealtimeDb =
+  app && firebaseConfig.databaseURL ? getDatabase(app) : null;
 
 export function getNamedFirebaseApp(appName = "managed-user-creator"): FirebaseApp | null {
   if (!isFirebaseConfigured) {

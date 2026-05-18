@@ -3,7 +3,13 @@
 import { useEffect, useState } from "react";
 
 import { StatusBadge } from "@/components/status-badge";
-import { createBin, deleteBin, getBins, updateBinStatus } from "@/lib/firestore";
+import {
+  createBin,
+  deleteBin,
+  getBins,
+  updateBinRealtimeMapping,
+  updateBinStatus,
+} from "@/lib/firestore";
 import type { BinStatus, WasteBin } from "@/types/domain";
 
 const initialForm = {
@@ -14,6 +20,7 @@ const initialForm = {
   lat: "",
   lng: "",
   deviceId: "",
+  realtimeKey: "",
   status: "kosong" as BinStatus,
   fillPercent: "0",
   note: "",
@@ -24,7 +31,11 @@ export default function AdminBinsPage() {
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [mappingSavingId, setMappingSavingId] = useState("");
   const [error, setError] = useState("");
+  const [mappingDrafts, setMappingDrafts] = useState<
+    Record<string, { deviceId: string; realtimeKey: string }>
+  >({});
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -39,7 +50,20 @@ export default function AdminBinsPage() {
     setError("");
 
     try {
-      setBins(await getBins());
+      const nextBins = await getBins();
+      setBins(nextBins);
+      setMappingDrafts((prev) => {
+        const nextDrafts = { ...prev };
+
+        for (const bin of nextBins) {
+          nextDrafts[bin.id] ??= {
+            deviceId: bin.deviceId,
+            realtimeKey: bin.realtimeKey ?? "",
+          };
+        }
+
+        return nextDrafts;
+      });
     } catch (nextError) {
       setError(
         nextError instanceof Error ? nextError.message : "Gagal memuat data tong.",
@@ -63,6 +87,7 @@ export default function AdminBinsPage() {
         lat: Number(form.lat),
         lng: Number(form.lng),
         deviceId: form.deviceId,
+        realtimeKey: form.realtimeKey || undefined,
         status: form.status,
         fillPercent: Number(form.fillPercent),
         note: form.note,
@@ -100,6 +125,30 @@ export default function AdminBinsPage() {
     }
   }
 
+  async function handleSaveMapping(binId: string) {
+    const draft = mappingDrafts[binId];
+
+    if (!draft) {
+      return;
+    }
+
+    setMappingSavingId(binId);
+    setError("");
+
+    try {
+      await updateBinRealtimeMapping(binId, draft);
+      await loadBins();
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Gagal menyimpan mapping realtime.",
+      );
+    } finally {
+      setMappingSavingId("");
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {error ? (
@@ -117,7 +166,8 @@ export default function AdminBinsPage() {
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground/70">
           Tambahkan lokasi baru, pasangkan device yang benar, lalu perbarui
-          status cepat saat ada perubahan di lapangan.
+          status cepat saat ada perubahan di lapangan. Jika sensor menulis ke
+          RTDB dengan key berbeda, simpan key itu pada `realtimeKey`.
         </p>
       </section>
 
@@ -127,7 +177,8 @@ export default function AdminBinsPage() {
         </h3>
         <p className="mt-2 text-sm text-foreground/65">
           Lengkapi data lokasi dengan teliti supaya petugas bisa langsung
-          diarahkan ke titik yang benar.
+          diarahkan ke titik yang benar. Idealnya `deviceId` sama dengan key
+          RTDB. Kalau belum sama, isi `realtimeKey`.
         </p>
         <div className="mt-5 rounded-[1.5rem] border border-line bg-white p-5">
           <form
@@ -148,6 +199,14 @@ export default function AdminBinsPage() {
                 setForm((prev) => ({ ...prev, deviceId: event.target.value }))
               }
               placeholder="Device ID"
+              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+            />
+            <input
+              value={form.realtimeKey}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, realtimeKey: event.target.value }))
+              }
+              placeholder="Realtime key"
               className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
             />
             <input
@@ -253,6 +312,7 @@ export default function AdminBinsPage() {
                 <tr>
                   <th className="pb-3 font-medium">Tong</th>
                   <th className="pb-3 font-medium">Device</th>
+                  <th className="pb-3 font-medium">RTDB Key</th>
                   <th className="pb-3 font-medium">Area</th>
                   <th className="pb-3 font-medium">Status</th>
                   <th className="pb-3 font-medium">Aksi</th>
@@ -265,13 +325,52 @@ export default function AdminBinsPage() {
                       <p className="font-medium">{bin.locationName}</p>
                       <p className="text-foreground/60">{bin.code}</p>
                     </td>
-                    <td className="py-3 font-mono text-xs">{bin.deviceId}</td>
+                    <td className="py-3">
+                      <input
+                        value={mappingDrafts[bin.id]?.deviceId ?? bin.deviceId}
+                        onChange={(event) =>
+                          setMappingDrafts((prev) => ({
+                            ...prev,
+                            [bin.id]: {
+                              deviceId: event.target.value,
+                              realtimeKey:
+                                prev[bin.id]?.realtimeKey ?? bin.realtimeKey ?? "",
+                            },
+                          }))
+                        }
+                        className="w-full min-w-36 rounded-[1rem] border border-line bg-white px-3 py-2 font-mono text-xs outline-none"
+                      />
+                    </td>
+                    <td className="py-3">
+                      <input
+                        value={mappingDrafts[bin.id]?.realtimeKey ?? bin.realtimeKey ?? ""}
+                        onChange={(event) =>
+                          setMappingDrafts((prev) => ({
+                            ...prev,
+                            [bin.id]: {
+                              deviceId: prev[bin.id]?.deviceId ?? bin.deviceId,
+                              realtimeKey: event.target.value,
+                            },
+                          }))
+                        }
+                        placeholder="contoh: tong_sampah_1"
+                        className="w-full min-w-40 rounded-[1rem] border border-line bg-white px-3 py-2 font-mono text-xs outline-none"
+                      />
+                    </td>
                     <td className="py-3">{bin.area}</td>
                     <td className="py-3">
                       <StatusBadge status={bin.status} />
                     </td>
                     <td className="py-3">
                       <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveMapping(bin.id)}
+                          disabled={mappingSavingId === bin.id}
+                          className="rounded-full border border-line px-3 py-2 text-xs"
+                        >
+                          {mappingSavingId === bin.id ? "Menyimpan..." : "Simpan Link"}
+                        </button>
                         <button
                           type="button"
                           onClick={() =>

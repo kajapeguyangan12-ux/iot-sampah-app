@@ -6,7 +6,7 @@ import { BinMap } from "@/components/bin-map";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
 import { formatDateTime } from "@/lib/format";
-import { getBins, getSensorLogs, getUsers } from "@/lib/firestore";
+import { getUsers, subscribeBins, subscribeSensorLogs } from "@/lib/firestore";
 import type { AppUser, SensorLog, WasteBin } from "@/types/domain";
 
 export default function AdminDashboardPage() {
@@ -15,37 +15,81 @@ export default function AdminDashboardPage() {
   const [logs, setLogs] = useState<SensorLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  const loadData = async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const [nextUsers, nextBins, nextLogs] = await Promise.all([
-        getUsers(),
-        getBins(),
-        getSensorLogs(),
-      ]);
-      setUsers(nextUsers);
-      setBins(nextBins);
-      setLogs(nextLogs);
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "Gagal memuat dashboard admin.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadData();
-    }, 0);
+    let active = true;
 
-    return () => window.clearTimeout(timer);
+    void getUsers()
+      .then((nextUsers) => {
+        if (!active) {
+          return;
+        }
+
+        setUsers(nextUsers);
+      })
+      .catch((nextError) => {
+        if (!active) {
+          return;
+        }
+
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Gagal memuat data pengguna.",
+        );
+      });
+
+    const unsubscribeBins = subscribeBins(
+      (nextBins) => {
+        if (!active) {
+          return;
+        }
+
+        setBins(nextBins);
+        setLoading(false);
+      },
+      (nextError) => {
+        if (!active) {
+          return;
+        }
+
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Gagal memuat data tong realtime.",
+        );
+        setLoading(false);
+      },
+    );
+
+    const unsubscribeLogs = subscribeSensorLogs(
+      (nextLogs) => {
+        if (!active) {
+          return;
+        }
+
+        setLogs(nextLogs);
+      },
+      (nextError) => {
+        if (!active) {
+          return;
+        }
+
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Gagal memuat log sensor realtime.",
+        );
+      },
+    );
+
+    return () => {
+      active = false;
+      unsubscribeBins();
+      unsubscribeLogs();
+    };
   }, []);
 
   const fullBins = bins.filter((bin) => bin.status === "penuh").length;
@@ -65,11 +109,54 @@ export default function AdminDashboardPage() {
     }, {}),
   ).sort((left, right) => right[1] - left[1]);
 
+  async function handleSyncRealtimeToFirestore() {
+    setSyncing(true);
+    setError("");
+    setSyncMessage("");
+
+    try {
+      const response = await fetch("/api/iot/sync-rtdb", {
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        ok: boolean;
+        message?: string;
+        data?: {
+          totalRealtimeNodes: number;
+          matchedBins: number;
+          unmatchedRealtimeKeys: string[];
+        };
+      };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || "Sinkronisasi RTDB gagal.");
+      }
+
+      const unmatchedCount = result.data?.unmatchedRealtimeKeys.length ?? 0;
+      setSyncMessage(
+        `Sync selesai. ${result.data?.matchedBins ?? 0} tong diperbarui dari ${result.data?.totalRealtimeNodes ?? 0} node realtime${unmatchedCount ? `, ${unmatchedCount} node belum punya pasangan` : ""}.`,
+      );
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Gagal menjalankan sync RTDB ke Firestore.",
+      );
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {error ? (
         <div className="rounded-[1.5rem] border border-danger/20 bg-danger/10 px-5 py-4 text-sm text-danger">
           {error}
+        </div>
+      ) : null}
+      {syncMessage ? (
+        <div className="rounded-[1.5rem] border border-brand/20 bg-brand/10 px-5 py-4 text-sm text-brand-strong">
+          {syncMessage}
         </div>
       ) : null}
 
@@ -85,11 +172,21 @@ export default function AdminDashboardPage() {
             <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground/70">
               Gunakan halaman ini untuk melihat titik yang perlu segera
               diangkut, mengecek persebaran area, dan memastikan data sensor
-              terbaru masuk dengan baik.
+              terbaru masuk langsung dari Realtime Database.
             </p>
           </div>
-          <div className="rounded-[1.25rem] border border-line bg-white/85 px-4 py-3 text-sm text-foreground/65">
-            Status data: {loading ? "memuat..." : "siap dipakai untuk tindak lanjut"}
+          <div className="flex flex-col items-stretch gap-3 lg:items-end">
+            <div className="rounded-[1.25rem] border border-line bg-white/85 px-4 py-3 text-sm text-foreground/65">
+              Status data: {loading ? "memuat..." : "siap dipakai untuk tindak lanjut"}
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleSyncRealtimeToFirestore()}
+              disabled={syncing}
+              className="rounded-full bg-brand px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {syncing ? "Menyinkronkan..." : "Sync RTDB ke Firestore"}
+            </button>
           </div>
         </div>
 

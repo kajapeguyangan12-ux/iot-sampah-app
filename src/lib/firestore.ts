@@ -1,6 +1,7 @@
 "use client";
 
 import { createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { get, onValue, ref, type Unsubscribe } from "firebase/database";
 import {
   addDoc,
   collection,
@@ -17,7 +18,13 @@ import {
   where,
 } from "firebase/firestore";
 
-import { firebaseDb, getNamedFirestore, getSecondaryAuth } from "@/lib/firebase";
+import {
+  firebaseDb,
+  firebaseRealtimeDb,
+  getNamedFirestore,
+  getSecondaryAuth,
+  isRealtimeDatabaseConfigured,
+} from "@/lib/firebase";
 import type { AppUser, BinStatus, SensorLog, WasteBin } from "@/types/domain";
 
 type BinInput = Omit<WasteBin, "id" | "lastUpdate">;
@@ -28,6 +35,15 @@ type ManagedUserInput = {
   password: string;
   area: string;
   role: AppUser["role"];
+};
+type WasteBinRecord = WasteBin & {
+  realtimeKey?: string;
+};
+type RealtimeBinReading = {
+  key: string;
+  fillPercent: number;
+  status: BinStatus;
+  recordedAt: string;
 };
 
 function normalizeUsername(username: string) {
@@ -47,6 +63,14 @@ function requireDb() {
   return firebaseDb;
 }
 
+function requireRealtimeDb() {
+  if (!firebaseRealtimeDb || !isRealtimeDatabaseConfigured) {
+    throw new Error("Firebase Realtime Database belum dikonfigurasi.");
+  }
+
+  return firebaseRealtimeDb;
+}
+
 function requireNamedDb(appName: string) {
   const db = getNamedFirestore(appName);
 
@@ -55,6 +79,239 @@ function requireNamedDb(appName: string) {
   }
 
   return db;
+}
+
+function normalizeLookupKey(value: string | undefined | null) {
+  return value?.trim().toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+}
+
+function clampFillPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function parseNumericValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.replace(",", ".").trim();
+
+    if (!normalized) {
+      return null;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function deriveStatusFromFillPercent(fillPercent: number): BinStatus {
+  if (fillPercent >= 80) {
+    return "penuh";
+  }
+
+  if (fillPercent >= 40) {
+    return "setengah";
+  }
+
+  return "kosong";
+}
+
+function normalizeStatus(rawStatus: unknown, fillPercent: number): BinStatus {
+  if (typeof rawStatus === "string") {
+    const normalized = rawStatus.trim().toLowerCase();
+
+    if (
+      normalized.includes("aman") ||
+      normalized.includes("belum penuh") ||
+      normalized.includes("tidak penuh") ||
+      normalized.includes("kosong") ||
+      normalized.includes("empty")
+    ) {
+      return "kosong";
+    }
+
+    if (
+      normalized.includes("setengah") ||
+      normalized.includes("waspada") ||
+      normalized.includes("warning") ||
+      normalized.includes("hampir")
+    ) {
+      return "setengah";
+    }
+
+    if (
+      normalized.includes("penuh") ||
+      normalized.includes("full") ||
+      normalized.includes("bahaya")
+    ) {
+      return "penuh";
+    }
+  }
+
+  return deriveStatusFromFillPercent(fillPercent);
+}
+
+function normalizeTimestamp(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const milliseconds = value > 1_000_000_000_000 ? value : value * 1000;
+    return new Date(milliseconds).toISOString();
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+
+  return new Date().toISOString();
+}
+
+function parseRealtimeBinReading(
+  key: string,
+  value: unknown,
+): RealtimeBinReading | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const parsedFillPercent =
+    parseNumericValue(record.persentase) ??
+    parseNumericValue(record.fillPercent) ??
+    parseNumericValue(record.percentage) ??
+    parseNumericValue(record.nilai) ??
+    parseNumericValue(record.value);
+
+  const fallbackFillPercent =
+    typeof record.status === "string" && record.status.toLowerCase().includes("penuh")
+      ? 100
+      : typeof record.status === "string" &&
+          (record.status.toLowerCase().includes("setengah") ||
+            record.status.toLowerCase().includes("waspada"))
+        ? 50
+        : 0;
+  const fillPercent = clampFillPercent(parsedFillPercent ?? fallbackFillPercent);
+
+  return {
+    key,
+    fillPercent,
+    status: normalizeStatus(record.status, fillPercent),
+    recordedAt: normalizeTimestamp(
+      record.recordedAt ?? record.lastUpdate ?? record.updatedAt ?? record.timestamp,
+    ),
+  };
+}
+
+function parseRealtimeBinReadings(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return [] as RealtimeBinReading[];
+  }
+
+  return Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => parseRealtimeBinReading(key, item))
+    .filter((item): item is RealtimeBinReading => item !== null);
+}
+
+function createBinLookupKeys(bin: Partial<WasteBinRecord>) {
+  return [
+    bin.realtimeKey,
+    bin.deviceId,
+    bin.code,
+    bin.id,
+    bin.locationName,
+  ]
+    .map((item) => normalizeLookupKey(item))
+    .filter(Boolean);
+}
+
+function createFallbackBin(reading: RealtimeBinReading): WasteBin {
+  const title = reading.key
+    .split(/[_-]/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+  return {
+    id: reading.key,
+    code: reading.key.toUpperCase(),
+    locationName: title || reading.key,
+    address: "Lokasi belum diatur di koleksi bins.",
+    area: "Belum dipetakan",
+    lat: Number.NaN,
+    lng: Number.NaN,
+    deviceId: reading.key,
+    status: reading.status,
+    fillPercent: reading.fillPercent,
+    lastUpdate: reading.recordedAt,
+    note: "Data sensor aktif di Realtime Database, tetapi metadata lokasi belum lengkap.",
+  };
+}
+
+function mergeBinsWithRealtimeReadings(
+  bins: WasteBinRecord[],
+  readings: RealtimeBinReading[],
+): WasteBin[] {
+  const readingMap = new Map(
+    readings.map((reading) => [normalizeLookupKey(reading.key), reading]),
+  );
+  const consumedKeys = new Set<string>();
+
+  const mergedBins = bins.map((bin) => {
+    const match = createBinLookupKeys(bin)
+      .map((candidate) => readingMap.get(candidate))
+      .find(Boolean);
+
+    if (match) {
+      consumedKeys.add(normalizeLookupKey(match.key));
+    }
+
+    return {
+      ...bin,
+      deviceId: match?.key ?? bin.deviceId,
+      status: match?.status ?? bin.status,
+      fillPercent: match?.fillPercent ?? bin.fillPercent,
+      lastUpdate: match?.recordedAt ?? bin.lastUpdate,
+    };
+  });
+
+  const fallbackBins = readings
+    .filter((reading) => !consumedKeys.has(normalizeLookupKey(reading.key)))
+    .map((reading) => createFallbackBin(reading));
+
+  return [...mergedBins, ...fallbackBins].sort((left, right) => {
+    const lastUpdateDiff =
+      new Date(right.lastUpdate).getTime() - new Date(left.lastUpdate).getTime();
+
+    if (lastUpdateDiff !== 0) {
+      return lastUpdateDiff;
+    }
+
+    return right.fillPercent - left.fillPercent;
+  });
+}
+
+async function getBinMetadata(): Promise<WasteBinRecord[]> {
+  const db = requireDb();
+  const snapshot = await getDocs(
+    query(collection(db, "bins"), orderBy("lastUpdate", "desc")),
+  );
+
+  return snapshot.docs.map((item) => ({
+    id: item.id,
+    ...(item.data() as Omit<WasteBinRecord, "id">),
+  }));
+}
+
+async function getRealtimeBinReadings() {
+  const realtimeDb = requireRealtimeDb();
+  const snapshot = await get(ref(realtimeDb));
+  return parseRealtimeBinReadings(snapshot.val());
 }
 
 export async function getUserProfile(uid: string): Promise<AppUser | null> {
@@ -251,14 +508,18 @@ export async function updateUsername(uid: string, username: string) {
 }
 
 export async function getBins(): Promise<WasteBin[]> {
-  const db = requireDb();
-  const snapshot = await getDocs(
-    query(collection(db, "bins"), orderBy("lastUpdate", "desc")),
-  );
-  return snapshot.docs.map((item) => ({
-    id: item.id,
-    ...(item.data() as Omit<WasteBin, "id">),
-  }));
+  const bins = await getBinMetadata();
+
+  if (!isRealtimeDatabaseConfigured) {
+    return bins;
+  }
+
+  try {
+    const readings = await getRealtimeBinReadings();
+    return mergeBinsWithRealtimeReadings(bins, readings);
+  } catch {
+    return bins;
+  }
 }
 
 export async function createBin(input: BinInput) {
@@ -285,12 +546,56 @@ export async function updateBinStatus(
   });
 }
 
+export async function updateBinRealtimeMapping(
+  id: string,
+  input: {
+    deviceId: string;
+    realtimeKey?: string;
+  },
+) {
+  const db = requireDb();
+  const normalizedDeviceId = input.deviceId.trim();
+  const normalizedRealtimeKey = input.realtimeKey?.trim();
+
+  if (!normalizedDeviceId) {
+    throw new Error("Device ID tidak boleh kosong.");
+  }
+
+  await updateDoc(doc(db, "bins", id), {
+    deviceId: normalizedDeviceId,
+    realtimeKey: normalizedRealtimeKey || null,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function deleteBin(id: string) {
   const db = requireDb();
   await deleteDoc(doc(db, "bins", id));
 }
 
 export async function getSensorLogs(): Promise<SensorLog[]> {
+  if (isRealtimeDatabaseConfigured) {
+    try {
+      const readings = await getRealtimeBinReadings();
+
+      return readings
+        .sort(
+          (left, right) =>
+            new Date(right.recordedAt).getTime() - new Date(left.recordedAt).getTime(),
+        )
+        .map((reading) => ({
+          id: `${reading.key}-${reading.recordedAt}`,
+          binId: reading.key,
+          deviceId: reading.key,
+          status: reading.status,
+          fillPercent: reading.fillPercent,
+          recordedAt: reading.recordedAt,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
   const db = requireDb();
   const snapshot = await getDocs(
     query(collection(db, "sensor_logs"), orderBy("recordedAt", "desc")),
@@ -299,4 +604,95 @@ export async function getSensorLogs(): Promise<SensorLog[]> {
     id: item.id,
     ...(item.data() as Omit<SensorLog, "id">),
   }));
+}
+
+export function subscribeBins(
+  onData: (bins: WasteBin[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  if (!isRealtimeDatabaseConfigured) {
+    void getBins().then(onData).catch((error) => onError?.(error as Error));
+    return () => undefined;
+  }
+
+  let active = true;
+  let metadataBins: WasteBinRecord[] = [];
+  let latestReadings: RealtimeBinReading[] = [];
+
+  void getBinMetadata()
+    .then((bins) => {
+      metadataBins = bins;
+      onData(mergeBinsWithRealtimeReadings(metadataBins, latestReadings));
+    })
+    .catch((error) => {
+      onError?.(
+        error instanceof Error ? error : new Error("Gagal memuat metadata tong."),
+      );
+    });
+
+  const unsubscribe = onValue(
+    ref(requireRealtimeDb()),
+    (snapshot) => {
+      if (!active) {
+        return;
+      }
+
+      latestReadings = parseRealtimeBinReadings(snapshot.val());
+      onData(mergeBinsWithRealtimeReadings(metadataBins, latestReadings));
+    },
+    (error) => {
+      void getBinMetadata()
+        .then((bins) => {
+          onData(bins);
+        })
+        .catch(() => {
+          onError?.(error);
+        });
+    },
+  );
+
+  return () => {
+    active = false;
+    unsubscribe();
+  };
+}
+
+export function subscribeSensorLogs(
+  onData: (logs: SensorLog[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  if (!isRealtimeDatabaseConfigured) {
+    void getSensorLogs().then(onData).catch((error) => onError?.(error as Error));
+    return () => undefined;
+  }
+
+  const unsubscribe = onValue(
+    ref(requireRealtimeDb()),
+    (snapshot) => {
+      const logs = parseRealtimeBinReadings(snapshot.val())
+        .sort(
+          (left, right) =>
+            new Date(right.recordedAt).getTime() -
+            new Date(left.recordedAt).getTime(),
+        )
+        .map((reading) => ({
+          id: `${reading.key}-${reading.recordedAt}`,
+          binId: reading.key,
+          deviceId: reading.key,
+          status: reading.status,
+          fillPercent: reading.fillPercent,
+          recordedAt: reading.recordedAt,
+        }));
+
+      onData(logs);
+    },
+    (error) => {
+      onData([]);
+      onError?.(error);
+    },
+  );
+
+  return () => {
+    unsubscribe();
+  };
 }

@@ -20,6 +20,7 @@ export type WasteBin = {
   lat: number;
   lng: number;
   deviceId: string;
+  realtimeKey?: string;
   status: BinStatus;
   fillPercent: number;
   lastUpdate: string;

@@ -10,7 +10,7 @@ import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
 import { statusOrder } from "@/lib/demo-data";
 import { formatDateTime } from "@/lib/format";
-import { getBins } from "@/lib/firestore";
+import { subscribeBins } from "@/lib/firestore";
 import type { WasteBin } from "@/types/domain";
 
 export default function OfficerPage() {
@@ -26,25 +26,28 @@ function OfficerDashboard() {
   const [bins, setBins] = useState<WasteBin[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const hasValidCoordinates = (bin: WasteBin) =>
+    Number.isFinite(bin.lat) && Number.isFinite(bin.lng);
 
   useEffect(() => {
-    async function loadBins() {
-      setLoading(true);
-      setError("");
-
-      try {
-        const nextBins = await getBins();
+    const unsubscribe = subscribeBins(
+      (nextBins) => {
         setBins(nextBins);
-      } catch (nextError) {
-        setError(
-          nextError instanceof Error ? nextError.message : "Gagal memuat data tong.",
-        );
-      } finally {
         setLoading(false);
-      }
-    }
+      },
+      (nextError) => {
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Gagal memuat data tong realtime.",
+        );
+        setLoading(false);
+      },
+    );
 
-    void loadBins();
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const sortedBins = [...bins].sort(
@@ -132,7 +135,7 @@ function OfficerDashboard() {
             </h2>
             <p className="text-sm text-foreground/65">
               Klik marker lalu pilih `Buka Arah` untuk langsung membuka panduan
-              perjalanan.
+              perjalanan. Status tong akan ikut bergerak saat data RTDB berubah.
             </p>
           </div>
           {loading ? (
@@ -180,13 +183,19 @@ function OfficerDashboard() {
                   <p>Pembaruan terakhir: {formatDateTime(bin.lastUpdate)}</p>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-3">
-                  <Link
-                    href={`https://www.google.com/maps/dir/?api=1&destination=${bin.lat},${bin.lng}`}
-                    target="_blank"
-                    className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white"
-                  >
-                    Tunjukkan Arah
-                  </Link>
+                  {hasValidCoordinates(bin) ? (
+                    <Link
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${bin.lat},${bin.lng}`}
+                      target="_blank"
+                      className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white"
+                    >
+                      Tunjukkan Arah
+                    </Link>
+                  ) : (
+                    <span className="rounded-full border border-line bg-surface px-4 py-2 text-sm text-foreground/55">
+                      Titik peta belum diatur
+                    </span>
+                  )}
                   <span className="rounded-full border border-line px-4 py-2 text-sm text-foreground/65">
                     {bin.note}
                   </span>

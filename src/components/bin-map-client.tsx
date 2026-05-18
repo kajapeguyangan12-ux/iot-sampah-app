@@ -29,8 +29,11 @@ export function BinMapClient({
   bins,
   showDirection = false,
 }: BinMapClientProps) {
-  const center: [number, number] = bins.length
-    ? [bins[0].lat, bins[0].lng]
+  const mappableBins = bins.filter(
+    (bin) => Number.isFinite(bin.lat) && Number.isFinite(bin.lng),
+  );
+  const center: [number, number] = mappableBins.length
+    ? [mappableBins[0].lat, mappableBins[0].lng]
     : [-6.2, 106.816666];
 
   return (
@@ -46,7 +49,7 @@ export function BinMapClient({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {bins.map((bin) => (
+        {mappableBins.map((bin) => (
           <Marker
             key={bin.id}
             position={[bin.lat, bin.lng]}
