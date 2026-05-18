@@ -1,16 +1,7 @@
-import {
-  addDoc,
-  collection,
-  getDoc,
-  getDocs,
-  limit,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-} from "firebase/firestore";
+import type { DocumentData, DocumentSnapshot, QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 
-import { firebaseDb, isFirebaseConfigured } from "@/lib/firebase";
+import { getFirebaseAdminDb, isFirebaseAdminConfigured } from "@/lib/firebase-admin";
 import type { BinStatus } from "@/types/domain";
 
 const allowedStatus = new Set<BinStatus>(["kosong", "setengah", "penuh"]);
@@ -35,6 +26,8 @@ type PersistReadingResult = {
   };
   sensorLogId: string;
 };
+
+type BinDocument = QueryDocumentSnapshot<DocumentData> | DocumentSnapshot<DocumentData>;
 
 function normalizeDeviceId(deviceId: string) {
   return deviceId.trim().toLowerCase();
@@ -77,10 +70,10 @@ export function validateIncomingStatus(status: BinStatus | undefined) {
 export async function persistSensorReading(
   input: PersistReadingInput,
 ): Promise<PersistReadingResult> {
-  if (!isFirebaseConfigured || !firebaseDb) {
+  if (!isFirebaseAdminConfigured()) {
     throw new IotIngestError(
       500,
-      "Firebase belum dikonfigurasi di server. Isi .env.local lalu jalankan ulang aplikasi.",
+      "Firebase Admin belum dikonfigurasi di server. Isi env service account lalu redeploy aplikasi.",
     );
   }
 
@@ -90,17 +83,20 @@ export async function persistSensorReading(
 
   validateIncomingStatus(input.status);
 
+  const firebaseDb = getFirebaseAdminDb();
   const status = resolveBinStatus(input.status, input.fillPercent);
   const recordedAt = input.recordedAt ?? new Date().toISOString();
   const normalizedDeviceId = normalizeDeviceId(input.deviceId);
-  const binsSnapshot = await getDocs(
-    query(collection(firebaseDb, "bins"), where("deviceId", "==", input.deviceId), limit(1)),
-  );
+  const binsSnapshot = await firebaseDb
+    .collection("bins")
+    .where("deviceId", "==", input.deviceId)
+    .limit(1)
+    .get();
 
-  let binDoc: (typeof binsSnapshot.docs)[number] | null = binsSnapshot.docs[0] ?? null;
+  let binDoc: BinDocument | null = binsSnapshot.docs[0] ?? null;
 
   if (!binDoc) {
-    const fallbackSnapshot = await getDocs(collection(firebaseDb, "bins"));
+    const fallbackSnapshot = await firebaseDb.collection("bins").get();
     binDoc =
       fallbackSnapshot.docs.find((item) => {
         const data = item.data() as { deviceId?: string };
@@ -109,7 +105,7 @@ export async function persistSensorReading(
   }
 
   if (!binDoc) {
-    const createdBinRef = await addDoc(collection(firebaseDb, "bins"), {
+    const createdBinRef = await firebaseDb.collection("bins").add({
       code: `AUTO-${input.deviceId}`,
       locationName: `Device ${input.deviceId}`,
       address: "Belum diatur",
@@ -121,12 +117,12 @@ export async function persistSensorReading(
       fillPercent: input.fillPercent,
       lastUpdate: recordedAt,
       note: "Dibuat otomatis dari sinkronisasi Blynk.",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
 
-    const createdBinSnapshot = await getDoc(createdBinRef);
-    binDoc = createdBinSnapshot.exists() ? createdBinSnapshot : null;
+    const createdBinSnapshot = await createdBinRef.get();
+    binDoc = createdBinSnapshot.exists ? createdBinSnapshot : null;
   }
 
   if (!binDoc) {
@@ -141,20 +137,20 @@ export async function persistSensorReading(
     area?: string;
   };
 
-  await updateDoc(binDoc.ref, {
+  await binDoc.ref.update({
     status,
     fillPercent: input.fillPercent,
     lastUpdate: recordedAt,
-    updatedAt: serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   });
 
-  const logRef = await addDoc(collection(firebaseDb, "sensor_logs"), {
+  const logRef = await firebaseDb.collection("sensor_logs").add({
     binId: binDoc.id,
     deviceId: input.deviceId,
     status,
     fillPercent: input.fillPercent,
     recordedAt,
-    createdAt: serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
   });
 
   return {
