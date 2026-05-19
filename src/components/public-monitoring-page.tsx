@@ -36,7 +36,6 @@ export function PublicMonitoringPage() {
   const [sending, setSending] = useState(false);
   const [reportMessage, setReportMessage] = useState("");
   const [reportError, setReportError] = useState("");
-  const [notice, setNotice] = useState("");
   const [reportForm, setReportForm] = useState<ReportForm>(initialReportForm);
 
   useEffect(() => {
@@ -64,7 +63,6 @@ export function PublicMonitoringPage() {
 
         setBins(result.data);
         setError("");
-        setNotice("");
       } catch (nextError) {
         if (!active) {
           return;
@@ -76,9 +74,6 @@ export function PublicMonitoringPage() {
             : "Gagal memuat data tong publik.";
 
         if (message.includes("Firebase Admin belum dikonfigurasi")) {
-          setNotice(
-            "Mode tamu sedang memakai koneksi langsung dari Firebase browser karena Firebase Admin belum diatur di server.",
-          );
           setError("");
 
           fallbackUnsubscribe?.();
@@ -191,15 +186,15 @@ export function PublicMonitoringPage() {
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
             <p className="text-sm uppercase tracking-[0.22em] text-brand">
-              Monitoring Publik
+              Eco-Smart Bin Grid
             </p>
             <h1 className="mt-3 text-4xl font-semibold tracking-tight text-brand-strong md:text-5xl">
-              Pantau sebaran tong sampah dan laporkan kendala tanpa login.
+              Monitoring publik untuk sistem tempat sampah pintar
             </h1>
             <p className="mt-4 text-sm leading-7 text-foreground/70 md:text-base">
-              Masyarakat bisa langsung melihat kondisi tong di lapangan,
-              memeriksa area yang penuh, dan mengirim laporan jika sampah belum
-              diambil.
+              Sistem berbasis Internet of Things (IoT) dengan energi surya,
+              sanitasi otomatis, dan pemantauan web real-time yang
+              dikembangkan oleh SMK Industri Penerbangan Cakra Nusantara.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -255,12 +250,6 @@ export function PublicMonitoringPage() {
           {error}
         </div>
       ) : null}
-      {notice ? (
-        <div className="rounded-[1.5rem] border border-brand/20 bg-brand/10 px-5 py-4 text-sm text-brand-strong">
-          {notice}
-        </div>
-      ) : null}
-
       <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="glass-panel rounded-[2rem] border border-line p-6 md:p-8">
           <div className="mb-5">

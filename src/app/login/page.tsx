@@ -1,10 +1,6 @@
 import Link from "next/link";
 
 import { LoginForm } from "@/components/login-form";
-import { isFirebaseConfigured } from "@/lib/firebase";
-
-const GUEST_USERNAME = process.env.NEXT_PUBLIC_GUEST_USERNAME ?? "tamu";
-const GUEST_PASSWORD = process.env.NEXT_PUBLIC_GUEST_PASSWORD ?? "123456";
 
 export default function LoginPage() {
   return (
@@ -16,10 +12,15 @@ export default function LoginPage() {
             Akses Cepat
           </p>
           <h1 className="relative mt-4 max-w-2xl text-4xl font-semibold tracking-tight md:text-5xl">
-            Mulai kerja dari informasi yang paling perlu ditindaklanjuti.
+            Selamat datang di Sistem Eco-Smart Bin Grid
           </h1>
           <p className="relative mt-5 max-w-2xl text-sm leading-7 text-white/80 md:text-base">
-            Setelah login, admin bisa memantau alarm kepenuhan dan mengatur data operasional. Petugas bisa langsung melihat tong prioritas serta arah menuju titik angkut.
+            Sistem tempat sampah pintar berbasis Internet of Things (IoT) yang
+            terintegrasi dengan energi surya, sanitasi otomatis, dan sistem
+            monitoring real-time berbasis web.
+          </p>
+          <p className="relative mt-4 text-sm font-medium uppercase tracking-[0.16em] text-[#f3d39a]">
+            Dibuat oleh SMK Industri Penerbangan Cakra Nusantara
           </p>
           <div className="relative mt-8 grid gap-4 md:grid-cols-3">
             <div className="rounded-[1.5rem] border border-white/12 bg-white/8 p-4">
@@ -35,36 +36,14 @@ export default function LoginPage() {
               <p className="mt-2 text-sm text-white/82">Lihat pembaruan status tanpa perlu membuka banyak menu.</p>
             </div>
           </div>
-          <div className="relative mt-8 rounded-[1.5rem] border border-white/14 bg-white/8 p-5 text-sm">
-            <p className="font-semibold">Kesiapan Data</p>
-            <p className="mt-2 text-white/78">
-              {isFirebaseConfigured
-                ? "Koneksi Firebase terdeteksi. Data kerja akan diambil dari Realtime Database dan Firestore."
-                : "Firebase belum aktif penuh. Aplikasi akan tetap menampilkan data contoh agar alur halaman bisa dicek."}
-            </p>
-          </div>
         </div>
 
         <div className="fade-up flex items-center">
           <div className="w-full">
-            <div className="mb-5 px-1">
-              <p className="text-sm uppercase tracking-[0.2em] text-brand">Login</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-brand-strong">
-                Masuk dan lanjutkan tugas hari ini
-              </h2>
-              <p className="mt-3 max-w-xl text-sm leading-7 text-foreground/70">
-                Gunakan akun yang sudah dibuat admin untuk membuka panel yang sesuai dengan peran Anda.
+            <div className="mb-6 text-center">
+              <p className="text-3xl font-semibold tracking-tight text-brand-strong md:text-4xl">
+                Login
               </p>
-              <div className="mt-4">
-                <div className="rounded-[1.5rem] border border-line bg-white p-4 text-sm text-foreground/72">
-                  <p className="font-semibold text-brand-strong">Akun Tamu Bersama</p>
-                  <p className="mt-2">Username: <span className="font-semibold">{GUEST_USERNAME}</span></p>
-                  <p>Password: <span className="font-semibold">{GUEST_PASSWORD}</span></p>
-                  <p className="mt-2 text-foreground/60">
-                    Gunakan akun ini untuk masuk ke halaman monitoring tamu.
-                  </p>
-                </div>
-              </div>
             </div>
             <LoginForm />
           </div>

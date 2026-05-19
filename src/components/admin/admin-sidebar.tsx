@@ -19,12 +19,16 @@ export function AdminSidebar() {
   return (
     <aside className="xl:sticky xl:top-6 xl:self-start">
       <div className="hero-grid rounded-[2rem] border border-[#245542]/14 bg-brand-strong p-6 text-white shadow-[0_30px_70px_rgba(18,63,49,0.16)]">
-        <p className="text-xs uppercase tracking-[0.28em] text-white/70">Panel Admin</p>
+        <p className="text-xs uppercase tracking-[0.28em] text-white/70">
+          Eco-Smart Bin Grid
+        </p>
         <h1 className="mt-4 text-3xl font-semibold leading-tight">
-          Kendalikan prioritas operasional dari satu panel.
+          Panel admin untuk monitoring tong sampah pintar.
         </h1>
         <p className="mt-4 text-sm leading-7 text-white/75">
-          Login sebagai {profile?.name}. Gunakan menu di bawah untuk memantau kondisi tong, memperbarui data, dan menjaga akses tim tetap rapi.
+          Dikembangkan oleh SMK Industri Penerbangan Cakra Nusantara untuk
+          memantau kondisi tong, laporan masuk, dan data operasional dalam satu
+          sistem.
         </p>
 
         <nav className="mt-8 grid gap-2">
@@ -65,12 +69,7 @@ export function AdminSidebar() {
         </nav>
 
         <div className="mt-8 rounded-[1.5rem] border border-white/12 bg-white/8 p-4">
-          <p className="text-xs uppercase tracking-[0.18em] text-white/65">Akses Cepat</p>
-          <div className="mt-3 space-y-3 text-sm text-white/78">
-            <p>Periksa dashboard untuk melihat tong yang harus segera diangkut.</p>
-            <p>Pastikan akun petugas aktif dan area tugasnya sesuai.</p>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-3">
             <Link
               href="/petugas"
               className="rounded-full border border-white/16 px-4 py-2 text-sm font-semibold text-white"

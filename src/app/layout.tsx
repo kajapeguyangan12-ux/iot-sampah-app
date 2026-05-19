@@ -3,8 +3,9 @@ import { AuthProvider } from "@/components/providers/auth-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Sistem IoT Sampah",
-  description: "Panel kerja admin dan petugas untuk memantau kepenuhan tong, mengatur akun, dan menindaklanjuti rute angkut.",
+  title: "Eco-Smart Bin Grid",
+  description:
+    "Sistem tempat sampah pintar berbasis Internet of Things (IoT) dengan monitoring real-time, energi surya, dan sanitasi otomatis oleh SMK Industri Penerbangan Cakra Nusantara.",
 };
 
 export default function RootLayout({

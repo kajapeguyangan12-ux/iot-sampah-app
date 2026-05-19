@@ -15,8 +15,6 @@ export default function AdminDashboardPage() {
   const [logs, setLogs] = useState<SensorLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -94,11 +92,6 @@ export default function AdminDashboardPage() {
 
   const fullBins = bins.filter((bin) => bin.status === "penuh").length;
   const warningBins = bins.filter((bin) => bin.status === "setengah").length;
-  const averageFill = bins.length
-    ? Math.round(
-        bins.reduce((total, bin) => total + bin.fillPercent, 0) / bins.length,
-      )
-    : 0;
   const priorityBins = [...bins]
     .sort((left, right) => right.fillPercent - left.fillPercent)
     .slice(0, 4);
@@ -109,44 +102,6 @@ export default function AdminDashboardPage() {
     }, {}),
   ).sort((left, right) => right[1] - left[1]);
 
-  async function handleSyncRealtimeToFirestore() {
-    setSyncing(true);
-    setError("");
-    setSyncMessage("");
-
-    try {
-      const response = await fetch("/api/iot/sync-rtdb", {
-        method: "POST",
-      });
-      const result = (await response.json()) as {
-        ok: boolean;
-        message?: string;
-        data?: {
-          totalRealtimeNodes: number;
-          matchedBins: number;
-          unmatchedRealtimeKeys: string[];
-        };
-      };
-
-      if (!response.ok || !result.ok) {
-        throw new Error(result.message || "Sinkronisasi RTDB gagal.");
-      }
-
-      const unmatchedCount = result.data?.unmatchedRealtimeKeys.length ?? 0;
-      setSyncMessage(
-        `Sync selesai. ${result.data?.matchedBins ?? 0} tong diperbarui dari ${result.data?.totalRealtimeNodes ?? 0} node realtime${unmatchedCount ? `, ${unmatchedCount} node belum punya pasangan` : ""}.`,
-      );
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "Gagal menjalankan sync RTDB ke Firestore.",
-      );
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   return (
     <div className="flex flex-col gap-6">
       {error ? (
@@ -154,39 +109,21 @@ export default function AdminDashboardPage() {
           {error}
         </div>
       ) : null}
-      {syncMessage ? (
-        <div className="rounded-[1.5rem] border border-brand/20 bg-brand/10 px-5 py-4 text-sm text-brand-strong">
-          {syncMessage}
-        </div>
-      ) : null}
 
       <section className="glass-panel hero-grid rounded-[2.2rem] border border-line p-6 md:p-8">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm uppercase tracking-[0.2em] text-brand">
-              Dashboard
+              Eco-Smart Bin Grid
             </p>
             <h2 className="mt-3 text-4xl font-semibold tracking-tight text-brand-strong">
-              Ringkasan tindakan untuk tim admin
+              Dashboard monitoring real-time untuk tim admin
             </h2>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground/70">
-              Gunakan halaman ini untuk melihat titik yang perlu segera
-              diangkut, mengecek persebaran area, dan memastikan data sensor
-              terbaru masuk langsung dari Realtime Database.
+              Sistem tempat sampah pintar berbasis Internet of Things (IoT)
+              dengan energi surya, sanitasi otomatis, dan pemantauan berbasis
+              web oleh SMK Industri Penerbangan Cakra Nusantara.
             </p>
-          </div>
-          <div className="flex flex-col items-stretch gap-3 lg:items-end">
-            <div className="rounded-[1.25rem] border border-line bg-white/85 px-4 py-3 text-sm text-foreground/65">
-              Status data: {loading ? "memuat..." : "siap dipakai untuk tindak lanjut"}
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleSyncRealtimeToFirestore()}
-              disabled={syncing}
-              className="rounded-full bg-brand px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
-            >
-              {syncing ? "Menyinkronkan..." : "Sync RTDB ke Firestore"}
-            </button>
           </div>
         </div>
 
@@ -286,7 +223,7 @@ export default function AdminDashboardPage() {
           </section>
 
           <section className="glass-panel rounded-[2rem] border border-line p-6 md:p-8">
-            <div className="mb-5 flex items-center justify-between gap-3">
+            <div className="mb-5">
               <div>
                 <p className="text-sm uppercase tracking-[0.2em] text-brand">
                   Area
@@ -294,9 +231,6 @@ export default function AdminDashboardPage() {
                 <h2 className="mt-3 text-2xl font-semibold text-brand-strong">
                   Sebaran tong per wilayah
                 </h2>
-              </div>
-              <div className="rounded-full border border-line bg-white/88 px-4 py-2 text-sm text-foreground/60">
-                Rata-rata isi {averageFill}%
               </div>
             </div>
             <div className="space-y-3">

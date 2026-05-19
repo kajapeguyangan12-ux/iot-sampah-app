@@ -65,14 +65,15 @@ function OfficerDashboard() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm uppercase tracking-[0.2em] text-brand">
-              Panel Petugas
+              Eco-Smart Bin Grid
             </p>
             <h1 className="mt-3 text-4xl font-semibold tracking-tight text-brand-strong">
-              Fokus ke titik angkut yang paling mendesak
+              Panel petugas untuk tindak lanjut lapangan
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground/70">
-              Login sebagai {profile?.name}. Buka rute kerja, lihat urutan
-              prioritas, dan cek catatan singkat sebelum berangkat ke lapangan.
+              Dikembangkan oleh SMK Industri Penerbangan Cakra Nusantara untuk
+              membantu petugas melihat prioritas angkut, kondisi tong, dan arah
+              titik lapangan secara real-time.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
