@@ -5,6 +5,9 @@ import { useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { isFirebaseConfigured } from "@/lib/firebase";
 
+const GUEST_USERNAME = process.env.NEXT_PUBLIC_GUEST_USERNAME ?? "tamu";
+const GUEST_PASSWORD = process.env.NEXT_PUBLIC_GUEST_PASSWORD ?? "123456";
+
 export function LoginForm() {
   const router = useRouter();
   const { signIn, loading } = useAuth();
@@ -16,14 +19,24 @@ export function LoginForm() {
     event.preventDefault();
     setError("");
 
-    if (!isFirebaseConfigured) {
+    const isGuestLogin =
+      username.trim().toLowerCase() === GUEST_USERNAME.toLowerCase() &&
+      password === GUEST_PASSWORD;
+
+    if (!isFirebaseConfigured && !isGuestLogin) {
       setError("Firebase belum dikonfigurasi penuh.");
       return;
     }
 
     try {
       const profile = await signIn(username, password);
-      router.push(profile?.role === "petugas" ? "/petugas" : "/admin");
+      router.push(
+        profile?.role === "petugas"
+          ? "/petugas"
+          : profile?.role === "tamu"
+            ? "/tamu"
+            : "/admin",
+      );
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -68,6 +81,17 @@ export function LoginForm() {
       <div className="rounded-[1.2rem] border border-brand/10 bg-brand/6 px-4 py-3 text-sm text-foreground/72">
         Masuk untuk melihat prioritas tong, pembaruan sensor terakhir, dan tindakan lapangan yang perlu dikerjakan hari ini.
       </div>
+
+      <button
+        type="button"
+        onClick={() => {
+          setUsername(GUEST_USERNAME);
+          setPassword(GUEST_PASSWORD);
+        }}
+        className="rounded-full border border-line px-5 py-3 text-sm font-semibold text-brand-strong"
+      >
+        Isi Akun Tamu
+      </button>
 
       <button
         type="submit"

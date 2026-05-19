@@ -1,15 +1,22 @@
-import { FieldValue } from "firebase-admin/firestore";
+import { NextResponse } from "next/server";
 
-import { getFirebaseAdminDb, getFirebaseAdminRealtimeDb } from "@/lib/firebase-admin";
+import {
+  getFirebaseAdminDb,
+  getFirebaseAdminRealtimeDb,
+  isFirebaseAdminConfigured,
+} from "@/lib/firebase-admin";
 import { deriveBinStatusFromFillPercent } from "@/lib/bin-status";
-import type { BinStatus } from "@/types/domain";
+import type { BinStatus, WasteBin } from "@/types/domain";
 
+type AdminBinRecord = Omit<WasteBin, "id">;
 type RealtimeReading = {
   key: string;
   fillPercent: number;
   status: BinStatus;
   recordedAt: string;
 };
+
+export const runtime = "nodejs";
 
 function normalizeLookupKey(value: string | undefined | null) {
   return value?.trim().toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
@@ -36,45 +43,6 @@ function parseNumericValue(value: unknown) {
   }
 
   return null;
-}
-
-function normalizeStatus(rawStatus: unknown, fillPercent: number): BinStatus {
-  const derivedStatus = deriveBinStatusFromFillPercent(fillPercent);
-
-  if (typeof rawStatus === "string") {
-    const normalized = rawStatus.trim().toLowerCase();
-
-    if (
-      normalized.includes("aman") ||
-      normalized.includes("belum penuh") ||
-      normalized.includes("tidak penuh") ||
-      normalized.includes("kosong") ||
-      normalized.includes("empty")
-    ) {
-      return derivedStatus;
-    }
-
-    if (
-      normalized.includes("sedang") ||
-      normalized.includes("setengah") ||
-      normalized.includes("waspada") ||
-      normalized.includes("warning") ||
-      normalized.includes("hampir")
-    ) {
-      return derivedStatus;
-    }
-
-    if (
-      normalized.includes("penuh") ||
-      normalized.includes("full") ||
-      normalized.includes("bahaya")
-    ) {
-      return derivedStatus;
-    }
-
-  }
-
-  return derivedStatus;
 }
 
 function normalizeTimestamp(value: unknown) {
@@ -112,7 +80,6 @@ function parseRealtimeReadings(value: unknown) {
         parseNumericValue(record.percentage) ??
         parseNumericValue(record.nilai) ??
         parseNumericValue(record.value);
-
       const fallbackFillPercent =
         typeof record.status === "string" && record.status.toLowerCase().includes("penuh")
           ? 100
@@ -127,7 +94,7 @@ function parseRealtimeReadings(value: unknown) {
       return {
         key,
         fillPercent,
-        status: normalizeStatus(record.status, fillPercent),
+        status: deriveBinStatusFromFillPercent(fillPercent),
         recordedAt: normalizeTimestamp(
           record.recordedAt ?? record.lastUpdate ?? record.updatedAt ?? record.timestamp,
         ),
@@ -136,13 +103,7 @@ function parseRealtimeReadings(value: unknown) {
     .filter((item): item is RealtimeReading => item !== null);
 }
 
-function buildCandidates(bin: {
-  id: string;
-  code?: string;
-  deviceId?: string;
-  realtimeKey?: string;
-  locationName?: string;
-}) {
+function createBinLookupKeys(bin: Partial<WasteBin>) {
   return [
     bin.realtimeKey,
     bin.deviceId,
@@ -154,63 +115,70 @@ function buildCandidates(bin: {
     .filter(Boolean);
 }
 
-export async function syncRealtimeToFirestore() {
-  const realtimeDb = getFirebaseAdminRealtimeDb();
-  const firestoreDb = getFirebaseAdminDb();
-  const snapshot = await realtimeDb.ref("/").get();
-  const readings = parseRealtimeReadings(snapshot.val());
+function mergeBinsWithRealtimeReadings(
+  bins: WasteBin[],
+  readings: RealtimeReading[],
+): WasteBin[] {
+  const readingMap = new Map(
+    readings.map((reading) => [normalizeLookupKey(reading.key), reading]),
+  );
 
-  const binsSnapshot = await firestoreDb.collection("bins").get();
-  const bins = binsSnapshot.docs.map((item) => ({
-    id: item.id,
-    ...(item.data() as {
-      code?: string;
-      deviceId?: string;
-      realtimeKey?: string;
-      locationName?: string;
-    }),
-  }));
+  return bins
+    .map((bin) => {
+      const match = createBinLookupKeys(bin)
+        .map((candidate) => readingMap.get(candidate))
+        .find(Boolean);
+      const fillPercent = match?.fillPercent ?? bin.fillPercent;
 
-  const results = {
-    totalRealtimeNodes: readings.length,
-    matchedBins: 0,
-    unmatchedRealtimeKeys: [] as string[],
-  };
+      return {
+        ...bin,
+        deviceId: match?.key ?? bin.deviceId,
+        status: deriveBinStatusFromFillPercent(fillPercent),
+        fillPercent,
+        lastUpdate: match?.recordedAt ?? bin.lastUpdate,
+      };
+    })
+    .sort((left, right) => right.fillPercent - left.fillPercent);
+}
 
-  for (const reading of readings) {
-    const normalizedKey = normalizeLookupKey(reading.key);
-    const matchedBin = bins.find((bin) =>
-      buildCandidates(bin).includes(normalizedKey),
-    );
-
-    if (!matchedBin) {
-      results.unmatchedRealtimeKeys.push(reading.key);
-      continue;
-    }
-
-    results.matchedBins += 1;
-
-    await firestoreDb.collection("bins").doc(matchedBin.id).set(
-      {
-        fillPercent: reading.fillPercent,
-        status: reading.status,
-        lastUpdate: reading.recordedAt,
-        realtimeKey: matchedBin.realtimeKey ?? reading.key,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    await firestoreDb.collection("sensor_logs").add({
-      binId: matchedBin.id,
-      deviceId: matchedBin.deviceId ?? reading.key,
-      realtimeKey: reading.key,
-      fillPercent: reading.fillPercent,
-      status: reading.status,
-      recordedAt: reading.recordedAt,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+async function getPublicBins() {
+  if (!isFirebaseAdminConfigured()) {
+    throw new Error("Firebase Admin belum dikonfigurasi.");
   }
 
-  return results;
+  const firestoreDb = getFirebaseAdminDb();
+  const realtimeDb = getFirebaseAdminRealtimeDb();
+
+  const binsSnapshot = await firestoreDb.collection("bins").orderBy("lastUpdate", "desc").get();
+  const bins = binsSnapshot.docs.map((item) => ({
+    id: item.id,
+    ...(item.data() as AdminBinRecord),
+  })) satisfies WasteBin[];
+
+  const realtimeSnapshot = await realtimeDb.ref("/").get();
+  const readings = parseRealtimeReadings(realtimeSnapshot.val());
+
+  return mergeBinsWithRealtimeReadings(bins, readings);
+}
+
+export async function GET() {
+  try {
+    const bins = await getPublicBins();
+
+    return NextResponse.json({
+      ok: true,
+      data: bins,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Gagal memuat data tong publik.",
+      },
+      { status: 500 },
+    );
+  }
 }

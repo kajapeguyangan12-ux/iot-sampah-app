@@ -2,8 +2,10 @@
 
 import L from "leaflet";
 import Link from "next/link";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { useEffect } from "react";
+import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 
+import { getBinStatusLabel } from "@/lib/bin-status";
 import type { WasteBin } from "@/types/domain";
 
 const createIcon = (color: string) =>
@@ -24,6 +26,29 @@ type BinMapClientProps = {
   bins: WasteBin[];
   showDirection?: boolean;
 };
+
+function FitMapToBins({ bins }: { bins: WasteBin[] }) {
+  const map = useMap();
+  const positions = bins.map((bin) => [bin.lat, bin.lng] as [number, number]);
+
+  useEffect(() => {
+    if (!positions.length) {
+      return;
+    }
+
+    if (positions.length === 1) {
+      map.setView(positions[0], 17);
+      return;
+    }
+
+    map.fitBounds(positions, {
+      padding: [36, 36],
+      maxZoom: 17,
+    });
+  }, [map, positions]);
+
+  return null;
+}
 
 export function BinMapClient({
   bins,
@@ -48,6 +73,7 @@ export function BinMapClient({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <FitMapToBins bins={mappableBins} />
 
         {mappableBins.map((bin) => (
           <Marker
@@ -62,7 +88,7 @@ export function BinMapClient({
                   <p className="text-slate-600">{bin.code}</p>
                 </div>
                 <div className="text-slate-700">
-                  <p>Status: {bin.status}</p>
+                  <p>Status: {getBinStatusLabel(bin.status)}</p>
                   <p>Kapasitas: {bin.fillPercent}%</p>
                   <p>Device: {bin.deviceId}</p>
                 </div>

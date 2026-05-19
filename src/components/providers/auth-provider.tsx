@@ -18,6 +18,19 @@ import { firebaseAuth, isFirebaseConfigured } from "@/lib/firebase";
 import { ensureProfileHasUsername, findUserByUsername, getUserProfile } from "@/lib/firestore";
 import type { AppUser } from "@/types/domain";
 
+const GUEST_USERNAME = process.env.NEXT_PUBLIC_GUEST_USERNAME ?? "tamu";
+const GUEST_PASSWORD = process.env.NEXT_PUBLIC_GUEST_PASSWORD ?? "123456";
+const GUEST_SESSION_KEY = "iot-sampah-guest-session";
+
+const guestProfile: AppUser = {
+  id: "guest-shared",
+  name: "Pengunjung Tamu",
+  username: GUEST_USERNAME,
+  email: "guest@iot-sampah.local",
+  role: "tamu",
+  area: "Publik",
+};
+
 type AuthContextValue = {
   authUser: User | null;
   profile: AppUser | null;
@@ -34,7 +47,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(isFirebaseConfigured);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && window.localStorage.getItem(GUEST_SESSION_KEY) === "true") {
+      setProfile(guestProfile);
+      setLoading(false);
+    }
+
     if (!isFirebaseConfigured || !firebaseAuth) {
+      if (typeof window !== "undefined" && window.localStorage.getItem(GUEST_SESSION_KEY) !== "true") {
+        setLoading(false);
+      }
       return;
     }
 
@@ -42,7 +63,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthUser(user);
 
       if (!user) {
-        setProfile(null);
+        if (typeof window !== "undefined" && window.localStorage.getItem(GUEST_SESSION_KEY) === "true") {
+          setProfile(guestProfile);
+        } else {
+          setProfile(null);
+        }
         setLoading(false);
         return;
       }
@@ -60,11 +85,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profile,
     loading,
     async signIn(username, password) {
+      const normalizedUsername = username.trim().toLowerCase();
+      const canUseGuestFallback =
+        normalizedUsername === GUEST_USERNAME.toLowerCase() &&
+        password === GUEST_PASSWORD;
+
       if (!firebaseAuth) {
+        if (canUseGuestFallback) {
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(GUEST_SESSION_KEY, "true");
+          }
+          setAuthUser(null);
+          setProfile(guestProfile);
+          setLoading(false);
+          return guestProfile;
+        }
+
         throw new Error("Firebase Auth belum aktif.");
       }
 
       setLoading(true);
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(GUEST_SESSION_KEY);
+      }
       const account =
         (await findUserByUsername(username)) ??
         (username.includes("@")
@@ -72,6 +115,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               email: username,
             }
           : null);
+
+      if (!account?.email && canUseGuestFallback) {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(GUEST_SESSION_KEY, "true");
+        }
+        setAuthUser(null);
+        setProfile(guestProfile);
+        setLoading(false);
+        return guestProfile;
+      }
 
       if (!account?.email) {
         setLoading(false);
@@ -96,7 +149,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return ensuredProfile;
     },
     async logout() {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(GUEST_SESSION_KEY);
+      }
+
+      setProfile(null);
+
       if (!firebaseAuth) {
+        setAuthUser(null);
         return;
       }
 

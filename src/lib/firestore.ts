@@ -25,7 +25,15 @@ import {
   getSecondaryAuth,
   isRealtimeDatabaseConfigured,
 } from "@/lib/firebase";
-import type { AppUser, BinStatus, SensorLog, WasteBin } from "@/types/domain";
+import { deriveBinStatusFromFillPercent } from "@/lib/bin-status";
+import type {
+  AppUser,
+  BinStatus,
+  PublicReport,
+  PublicReportStatus,
+  SensorLog,
+  WasteBin,
+} from "@/types/domain";
 
 type BinInput = Omit<WasteBin, "id" | "lastUpdate">;
 type ManagedUserInput = {
@@ -108,19 +116,9 @@ function parseNumericValue(value: unknown) {
   return null;
 }
 
-function deriveStatusFromFillPercent(fillPercent: number): BinStatus {
-  if (fillPercent >= 80) {
-    return "penuh";
-  }
-
-  if (fillPercent >= 40) {
-    return "setengah";
-  }
-
-  return "kosong";
-}
-
 function normalizeStatus(rawStatus: unknown, fillPercent: number): BinStatus {
+  const derivedStatus = deriveBinStatusFromFillPercent(fillPercent);
+
   if (typeof rawStatus === "string") {
     const normalized = rawStatus.trim().toLowerCase();
 
@@ -131,16 +129,17 @@ function normalizeStatus(rawStatus: unknown, fillPercent: number): BinStatus {
       normalized.includes("kosong") ||
       normalized.includes("empty")
     ) {
-      return "kosong";
+      return derivedStatus;
     }
 
     if (
+      normalized.includes("sedang") ||
       normalized.includes("setengah") ||
       normalized.includes("waspada") ||
       normalized.includes("warning") ||
       normalized.includes("hampir")
     ) {
-      return "setengah";
+      return derivedStatus;
     }
 
     if (
@@ -148,11 +147,11 @@ function normalizeStatus(rawStatus: unknown, fillPercent: number): BinStatus {
       normalized.includes("full") ||
       normalized.includes("bahaya")
     ) {
-      return "penuh";
+      return derivedStatus;
     }
   }
 
-  return deriveStatusFromFillPercent(fillPercent);
+  return derivedStatus;
 }
 
 function normalizeTimestamp(value: unknown) {
@@ -192,7 +191,8 @@ function parseRealtimeBinReading(
     typeof record.status === "string" && record.status.toLowerCase().includes("penuh")
       ? 100
       : typeof record.status === "string" &&
-          (record.status.toLowerCase().includes("setengah") ||
+          (record.status.toLowerCase().includes("sedang") ||
+            record.status.toLowerCase().includes("setengah") ||
             record.status.toLowerCase().includes("waspada"))
         ? 50
         : 0;
@@ -271,11 +271,13 @@ function mergeBinsWithRealtimeReadings(
       consumedKeys.add(normalizeLookupKey(match.key));
     }
 
+    const fillPercent = match?.fillPercent ?? bin.fillPercent;
+
     return {
       ...bin,
       deviceId: match?.key ?? bin.deviceId,
-      status: match?.status ?? bin.status,
-      fillPercent: match?.fillPercent ?? bin.fillPercent,
+      status: deriveBinStatusFromFillPercent(fillPercent),
+      fillPercent,
       lastUpdate: match?.recordedAt ?? bin.lastUpdate,
     };
   });
@@ -524,22 +526,39 @@ export async function getBins(): Promise<WasteBin[]> {
 
 export async function createBin(input: BinInput) {
   const db = requireDb();
+  const fillPercent = Number(input.fillPercent);
+
   await addDoc(collection(db, "bins"), {
     ...input,
+    status: deriveBinStatusFromFillPercent(fillPercent),
+    fillPercent,
     lastUpdate: new Date().toISOString(),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 }
 
+export async function updateBin(id: string, input: BinInput) {
+  const db = requireDb();
+  const fillPercent = Number(input.fillPercent);
+
+  await updateDoc(doc(db, "bins", id), {
+    ...input,
+    status: deriveBinStatusFromFillPercent(fillPercent),
+    fillPercent,
+    lastUpdate: new Date().toISOString(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function updateBinStatus(
   id: string,
-  status: BinStatus,
+  _status: BinStatus,
   fillPercent: number,
 ) {
   const db = requireDb();
   await updateDoc(doc(db, "bins", id), {
-    status,
+    status: deriveBinStatusFromFillPercent(fillPercent),
     fillPercent,
     lastUpdate: new Date().toISOString(),
     updatedAt: serverTimestamp(),
@@ -587,7 +606,7 @@ export async function getSensorLogs(): Promise<SensorLog[]> {
           id: `${reading.key}-${reading.recordedAt}`,
           binId: reading.key,
           deviceId: reading.key,
-          status: reading.status,
+          status: deriveBinStatusFromFillPercent(reading.fillPercent),
           fillPercent: reading.fillPercent,
           recordedAt: reading.recordedAt,
         }));
@@ -603,7 +622,45 @@ export async function getSensorLogs(): Promise<SensorLog[]> {
   return snapshot.docs.map((item) => ({
     id: item.id,
     ...(item.data() as Omit<SensorLog, "id">),
+    status: deriveBinStatusFromFillPercent(
+      (item.data() as Omit<SensorLog, "id">).fillPercent,
+    ),
   }));
+}
+
+export async function getPublicReports(): Promise<PublicReport[]> {
+  const db = requireDb();
+  const snapshot = await getDocs(
+    query(collection(db, "public_reports"), orderBy("submittedAt", "desc")),
+  );
+
+  return snapshot.docs.map((item) => {
+    const data = item.data() as Partial<PublicReport>;
+
+    return {
+      id: item.id,
+      reporterName: data.reporterName ?? null,
+      phone: data.phone ?? null,
+      binId: data.binId ?? null,
+      locationName: data.locationName ?? "Lokasi belum diisi",
+      details: data.details ?? "",
+      source: data.source ?? "public-monitoring",
+      status: data.status ?? "baru",
+      submittedAt: data.submittedAt ?? new Date().toISOString(),
+    } satisfies PublicReport;
+  });
+}
+
+export async function updatePublicReportStatus(
+  id: string,
+  status: PublicReportStatus,
+) {
+  const db = requireDb();
+  await updateDoc(doc(db, "public_reports", id), {
+    status,
+    updatedAt: serverTimestamp(),
+    handledAt: status === "selesai" ? new Date().toISOString() : null,
+  });
 }
 
 export function subscribeBins(
@@ -679,7 +736,7 @@ export function subscribeSensorLogs(
           id: `${reading.key}-${reading.recordedAt}`,
           binId: reading.key,
           deviceId: reading.key,
-          status: reading.status,
+          status: deriveBinStatusFromFillPercent(reading.fillPercent),
           fillPercent: reading.fillPercent,
           recordedAt: reading.recordedAt,
         }));

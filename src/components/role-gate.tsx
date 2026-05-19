@@ -11,6 +11,17 @@ type RoleGateProps = {
   children: React.ReactNode;
 };
 
+function getRouteByRole(role: UserRole) {
+  switch (role) {
+    case "admin":
+      return "/admin";
+    case "petugas":
+      return "/petugas";
+    default:
+      return "/tamu";
+  }
+}
+
 export function RoleGate({ allow, children }: RoleGateProps) {
   const router = useRouter();
   const { loading, profile, authUser } = useAuth();
@@ -20,17 +31,17 @@ export function RoleGate({ allow, children }: RoleGateProps) {
       return;
     }
 
-    if (!authUser) {
+    if (!authUser && !profile) {
       router.replace("/login");
       return;
     }
 
     if (profile && profile.role !== allow) {
-      router.replace(profile.role === "admin" ? "/admin" : "/petugas");
+      router.replace(getRouteByRole(profile.role));
     }
   }, [allow, authUser, loading, profile, router]);
 
-  if (loading || !authUser || !profile || profile.role !== allow) {
+  if (loading || !profile || profile.role !== allow) {
     return (
       <main className="mx-auto flex w-full max-w-4xl flex-1 items-center justify-center px-6 py-12">
         <div className="rounded-[1.75rem] border border-line bg-surface px-6 py-5 text-sm text-foreground/65 shadow-sm">

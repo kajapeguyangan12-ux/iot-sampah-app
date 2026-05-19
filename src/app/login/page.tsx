@@ -1,5 +1,10 @@
+import Link from "next/link";
+
 import { LoginForm } from "@/components/login-form";
 import { isFirebaseConfigured } from "@/lib/firebase";
+
+const GUEST_USERNAME = process.env.NEXT_PUBLIC_GUEST_USERNAME ?? "tamu";
+const GUEST_PASSWORD = process.env.NEXT_PUBLIC_GUEST_PASSWORD ?? "123456";
 
 export default function LoginPage() {
   return (
@@ -50,6 +55,16 @@ export default function LoginPage() {
               <p className="mt-3 max-w-xl text-sm leading-7 text-foreground/70">
                 Gunakan akun yang sudah dibuat admin untuk membuka panel yang sesuai dengan peran Anda.
               </p>
+              <div className="mt-4">
+                <div className="rounded-[1.5rem] border border-line bg-white p-4 text-sm text-foreground/72">
+                  <p className="font-semibold text-brand-strong">Akun Tamu Bersama</p>
+                  <p className="mt-2">Username: <span className="font-semibold">{GUEST_USERNAME}</span></p>
+                  <p>Password: <span className="font-semibold">{GUEST_PASSWORD}</span></p>
+                  <p className="mt-2 text-foreground/60">
+                    Gunakan akun ini untuk masuk ke halaman monitoring tamu.
+                  </p>
+                </div>
+              </div>
             </div>
             <LoginForm />
           </div>

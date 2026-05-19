@@ -9,6 +9,7 @@ const navItems = [
   { href: "/admin", label: "Dashboard", code: "01" },
   { href: "/admin/pengguna", label: "Kelola Pengguna", code: "02" },
   { href: "/admin/tong", label: "Kelola Tong", code: "03" },
+  { href: "/admin/laporan", label: "Laporan Masuk", code: "04" },
 ];
 
 export function AdminSidebar() {

@@ -1,3 +1,4 @@
+import { getBinStatusLabel } from "@/lib/bin-status";
 import { getStatusTone } from "@/lib/demo-data";
 import type { BinStatus } from "@/types/domain";
 
@@ -12,7 +13,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
         status,
       )}`}
     >
-      {status}
+      {getBinStatusLabel(status)}
     </span>
   );
 }

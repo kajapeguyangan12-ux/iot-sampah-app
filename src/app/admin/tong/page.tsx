@@ -4,11 +4,15 @@ import { useEffect, useState } from "react";
 
 import { StatusBadge } from "@/components/status-badge";
 import {
+  deriveBinStatusFromFillPercent,
+  getBinStatusLabel,
+} from "@/lib/bin-status";
+import {
   createBin,
   deleteBin,
   getBins,
+  updateBin,
   updateBinRealtimeMapping,
-  updateBinStatus,
 } from "@/lib/firestore";
 import type { BinStatus, WasteBin } from "@/types/domain";
 
@@ -29,6 +33,7 @@ const initialForm = {
 export default function AdminBinsPage() {
   const [bins, setBins] = useState<WasteBin[]>([]);
   const [form, setForm] = useState(initialForm);
+  const [editingBinId, setEditingBinId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [mappingSavingId, setMappingSavingId] = useState("");
@@ -36,6 +41,9 @@ export default function AdminBinsPage() {
   const [mappingDrafts, setMappingDrafts] = useState<
     Record<string, { deviceId: string; realtimeKey: string }>
   >({});
+  const derivedFormStatus = deriveBinStatusFromFillPercent(
+    Number(form.fillPercent) || 0,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -73,50 +81,75 @@ export default function AdminBinsPage() {
     }
   }
 
-  async function handleCreateBin(event: React.FormEvent<HTMLFormElement>) {
+  function resetForm() {
+    setForm(initialForm);
+    setEditingBinId("");
+  }
+
+  function handleStartEdit(bin: WasteBin) {
+    setEditingBinId(bin.id);
+    setForm({
+      code: bin.code,
+      locationName: bin.locationName,
+      address: bin.address,
+      area: bin.area,
+      lat: `${bin.lat}`,
+      lng: `${bin.lng}`,
+      deviceId: bin.deviceId,
+      realtimeKey: bin.realtimeKey ?? "",
+      status: bin.status,
+      fillPercent: `${bin.fillPercent}`,
+      note: bin.note,
+    });
+  }
+
+  async function handleSubmitBin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError("");
 
+    const payload = {
+      code: form.code,
+      locationName: form.locationName,
+      address: form.address,
+      area: form.area,
+      lat: Number(form.lat),
+      lng: Number(form.lng),
+      deviceId: form.deviceId,
+      realtimeKey: form.realtimeKey || undefined,
+      status: derivedFormStatus,
+      fillPercent: Number(form.fillPercent),
+      note: form.note,
+    };
+
     try {
-      await createBin({
-        code: form.code,
-        locationName: form.locationName,
-        address: form.address,
-        area: form.area,
-        lat: Number(form.lat),
-        lng: Number(form.lng),
-        deviceId: form.deviceId,
-        realtimeKey: form.realtimeKey || undefined,
-        status: form.status,
-        fillPercent: Number(form.fillPercent),
-        note: form.note,
-      });
-      setForm(initialForm);
+      if (editingBinId) {
+        await updateBin(editingBinId, payload);
+      } else {
+        await createBin(payload);
+      }
+
+      resetForm();
       await loadBins();
     } catch (nextError) {
       setError(
-        nextError instanceof Error ? nextError.message : "Gagal menambah tong.",
+        nextError instanceof Error
+          ? nextError.message
+          : editingBinId
+            ? "Gagal mengubah data tong."
+            : "Gagal menambah tong.",
       );
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleQuickStatus(binId: string, status: BinStatus, fill: number) {
-    try {
-      await updateBinStatus(binId, status, fill);
-      await loadBins();
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "Gagal mengubah status tong.",
-      );
-    }
-  }
-
   async function handleDeleteBin(binId: string) {
     try {
       await deleteBin(binId);
+      if (editingBinId === binId) {
+        resetForm();
+      }
       await loadBins();
     } catch (nextError) {
       setError(
@@ -165,132 +198,177 @@ export default function AdminBinsPage() {
           Rapikan titik angkut dan perangkat aktif
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground/70">
-          Tambahkan lokasi baru, pasangkan device yang benar, lalu perbarui
-          status cepat saat ada perubahan di lapangan. Jika sensor menulis ke
-          RTDB dengan key berbeda, simpan key itu pada `realtimeKey`.
+          Tambahkan lokasi baru, pasangkan device yang benar, lalu rapikan data
+          tong saat ada perubahan di lapangan. Jika sensor menulis ke RTDB
+          dengan key berbeda, simpan key itu pada `realtimeKey`.
         </p>
       </section>
 
       <section className="glass-panel rounded-[2rem] border border-line p-6 md:p-8">
-        <h3 className="text-xl font-semibold text-brand-strong">
-          Tambah Tong Sampah
-        </h3>
-        <p className="mt-2 text-sm text-foreground/65">
-          Lengkapi data lokasi dengan teliti supaya petugas bisa langsung
-          diarahkan ke titik yang benar. Idealnya `deviceId` sama dengan key
-          RTDB. Kalau belum sama, isi `realtimeKey`.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xl font-semibold text-brand-strong">
+              {editingBinId ? "Edit Tong Sampah" : "Tambah Tong Sampah"}
+            </h3>
+            <p className="mt-2 text-sm text-foreground/65">
+              Lengkapi data lokasi dengan teliti supaya petugas bisa langsung
+              diarahkan ke titik yang benar. Idealnya `deviceId` sama dengan key
+              RTDB. Kalau belum sama, isi `realtimeKey`.
+            </p>
+          </div>
+          {editingBinId ? (
+            <button
+              type="button"
+              onClick={resetForm}
+              className="rounded-full border border-line px-4 py-2 text-sm text-foreground/70"
+            >
+              Batal Edit
+            </button>
+          ) : null}
+        </div>
         <div className="mt-5 rounded-[1.5rem] border border-line bg-white p-5">
           <form
-            onSubmit={handleCreateBin}
+            onSubmit={handleSubmitBin}
             className="grid gap-3 md:grid-cols-2 xl:grid-cols-3"
           >
-            <input
-              value={form.code}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, code: event.target.value }))
-              }
-              placeholder="Kode tong"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
-            />
-            <input
-              value={form.deviceId}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, deviceId: event.target.value }))
-              }
-              placeholder="Device ID"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
-            />
-            <input
-              value={form.realtimeKey}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, realtimeKey: event.target.value }))
-              }
-              placeholder="Realtime key"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
-            />
-            <input
-              value={form.area}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, area: event.target.value }))
-              }
-              placeholder="Area"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
-            />
-            <input
-              value={form.locationName}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  locationName: event.target.value,
-                }))
-              }
-              placeholder="Nama lokasi"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none md:col-span-2 xl:col-span-2"
-            />
-            <select
-              value={form.status}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  status: event.target.value as BinStatus,
-                }))
-              }
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
-            >
-              <option value="kosong">kosong</option>
-              <option value="setengah">setengah</option>
-              <option value="penuh">penuh</option>
-            </select>
-            <input
-              value={form.address}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, address: event.target.value }))
-              }
-              placeholder="Alamat"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none md:col-span-2 xl:col-span-3"
-            />
-            <input
-              value={form.lat}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, lat: event.target.value }))
-              }
-              placeholder="Latitude"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
-            />
-            <input
-              value={form.lng}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, lng: event.target.value }))
-              }
-              placeholder="Longitude"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
-            />
-            <input
-              value={form.fillPercent}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  fillPercent: event.target.value,
-                }))
-              }
-              placeholder="Persentase isi"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
-            />
-            <input
-              value={form.note}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, note: event.target.value }))
-              }
-              placeholder="Catatan petugas"
-              className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none md:col-span-2 xl:col-span-2"
-            />
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-brand-strong">Kode tong</span>
+              <input
+                value={form.code}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, code: event.target.value }))
+                }
+                placeholder="Contoh: TNG-001"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-brand-strong">Device ID</span>
+              <input
+                value={form.deviceId}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, deviceId: event.target.value }))
+                }
+                placeholder="ID perangkat sensor"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-brand-strong">Realtime key</span>
+              <input
+                value={form.realtimeKey}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, realtimeKey: event.target.value }))
+                }
+                placeholder="Key node di RTDB jika berbeda dari Device ID"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-brand-strong">Area</span>
+              <input
+                value={form.area}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, area: event.target.value }))
+                }
+                placeholder="Contoh: zona barat"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-2 md:col-span-2 xl:col-span-2">
+              <span className="text-sm font-medium text-brand-strong">Nama lokasi</span>
+              <input
+                value={form.locationName}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    locationName: event.target.value,
+                  }))
+                }
+                placeholder="Nama titik tong di lapangan"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-brand-strong">Status</span>
+              <select
+                value={derivedFormStatus}
+                disabled
+                className="rounded-[1.2rem] border border-line bg-surface px-4 py-3 text-sm text-foreground/70 outline-none disabled:opacity-100"
+              >
+                <option value={derivedFormStatus}>
+                  Otomatis dari persentase isi: {getBinStatusLabel(derivedFormStatus)}
+                </option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-2 md:col-span-2 xl:col-span-3">
+              <span className="text-sm font-medium text-brand-strong">Alamat</span>
+              <input
+                value={form.address}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, address: event.target.value }))
+                }
+                placeholder="Alamat lengkap lokasi tong"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-brand-strong">Latitude</span>
+              <input
+                value={form.lat}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, lat: event.target.value }))
+                }
+                placeholder="Koordinat lintang"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-brand-strong">Longitude</span>
+              <input
+                value={form.lng}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, lng: event.target.value }))
+                }
+                placeholder="Koordinat bujur"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-brand-strong">Persentase isi</span>
+              <input
+                value={form.fillPercent}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    fillPercent: event.target.value,
+                  }))
+                }
+                placeholder="Isi tong 0 sampai 100"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-2 md:col-span-2 xl:col-span-2">
+              <span className="text-sm font-medium text-brand-strong">Catatan petugas</span>
+              <input
+                value={form.note}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, note: event.target.value }))
+                }
+                placeholder="Keterangan tambahan tentang kondisi tong"
+                className="rounded-[1.2rem] border border-line bg-white px-4 py-3 text-sm outline-none"
+              />
+            </label>
             <button
               type="submit"
               disabled={saving}
               className="rounded-full bg-brand px-5 py-3 text-sm font-semibold text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan Tong"}
+              {saving
+                ? "Menyimpan..."
+                : editingBinId
+                  ? "Simpan Perubahan"
+                  : "Simpan Tong"}
             </button>
           </form>
         </div>
@@ -373,30 +451,10 @@ export default function AdminBinsPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() =>
-                            void handleQuickStatus(bin.id, "kosong", 10)
-                          }
+                          onClick={() => handleStartEdit(bin)}
                           className="rounded-full border border-line px-3 py-2 text-xs"
                         >
-                          Kosong
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleQuickStatus(bin.id, "setengah", 55)
-                          }
-                          className="rounded-full border border-line px-3 py-2 text-xs"
-                        >
-                          Setengah
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleQuickStatus(bin.id, "penuh", 95)
-                          }
-                          className="rounded-full border border-line px-3 py-2 text-xs"
-                        >
-                          Penuh
+                          Edit
                         </button>
                         <button
                           type="button"

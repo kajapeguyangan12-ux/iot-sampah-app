@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "petugas";
+export type UserRole = "admin" | "petugas" | "tamu";
 
 export type BinStatus = "kosong" | "setengah" | "penuh";
 
@@ -34,4 +34,18 @@ export type SensorLog = {
   status: BinStatus;
   fillPercent: number;
   recordedAt: string;
+};
+
+export type PublicReportStatus = "baru" | "diproses" | "selesai";
+
+export type PublicReport = {
+  id: string;
+  reporterName: string | null;
+  phone: string | null;
+  binId: string | null;
+  locationName: string;
+  details: string;
+  source: string;
+  status: PublicReportStatus;
+  submittedAt: string;
 };

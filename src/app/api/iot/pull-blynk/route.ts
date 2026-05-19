@@ -37,6 +37,10 @@ function normalizeBlynkStatus(rawValue: unknown): BinStatus | undefined {
     return "kosong";
   }
 
+  if (normalized.includes("sedang")) {
+    return "setengah";
+  }
+
   if (normalized.includes("setengah")) {
     return "setengah";
   }

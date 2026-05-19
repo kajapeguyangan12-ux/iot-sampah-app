@@ -195,6 +195,7 @@ export default function AdminUsersPage() {
             >
               <option value="admin">admin</option>
               <option value="petugas">petugas</option>
+              <option value="tamu">tamu</option>
             </select>
             <button
               type="submit"
@@ -266,6 +267,7 @@ export default function AdminUsersPage() {
                       >
                         <option value="admin">admin</option>
                         <option value="petugas">petugas</option>
+                        <option value="tamu">tamu</option>
                       </select>
                     </td>
                     <td className="py-3">{user.area}</td>

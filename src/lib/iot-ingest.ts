@@ -2,6 +2,7 @@ import type { DocumentData, DocumentSnapshot, QueryDocumentSnapshot } from "fire
 import { FieldValue } from "firebase-admin/firestore";
 
 import { getFirebaseAdminDb, isFirebaseAdminConfigured } from "@/lib/firebase-admin";
+import { deriveBinStatusFromFillPercent } from "@/lib/bin-status";
 import type { BinStatus } from "@/types/domain";
 
 const allowedStatus = new Set<BinStatus>(["kosong", "setengah", "penuh"]);
@@ -43,22 +44,10 @@ export class IotIngestError extends Error {
 }
 
 export function resolveBinStatus(
-  status: BinStatus | undefined,
+  _status: BinStatus | undefined,
   fillPercent: number,
 ): BinStatus {
-  if (status && allowedStatus.has(status)) {
-    return status;
-  }
-
-  if (fillPercent >= 80) {
-    return "penuh";
-  }
-
-  if (fillPercent >= 40) {
-    return "setengah";
-  }
-
-  return "kosong";
+  return deriveBinStatusFromFillPercent(fillPercent);
 }
 
 export function validateIncomingStatus(status: BinStatus | undefined) {
