@@ -10,6 +10,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -667,50 +668,61 @@ export function subscribeBins(
   onData: (bins: WasteBin[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  if (!isRealtimeDatabaseConfigured) {
-    void getBins().then(onData).catch((error) => onError?.(error as Error));
-    return () => undefined;
-  }
-
   let active = true;
   let metadataBins: WasteBinRecord[] = [];
   let latestReadings: RealtimeBinReading[] = [];
+  const db = requireDb();
+  const binsQuery = query(collection(db, "bins"), orderBy("lastUpdate", "desc"));
+  const emitMergedBins = () => {
+    onData(
+      isRealtimeDatabaseConfigured
+        ? mergeBinsWithRealtimeReadings(metadataBins, latestReadings)
+        : metadataBins,
+    );
+  };
 
-  void getBinMetadata()
-    .then((bins) => {
-      metadataBins = bins;
-      onData(mergeBinsWithRealtimeReadings(metadataBins, latestReadings));
-    })
-    .catch((error) => {
-      onError?.(
-        error instanceof Error ? error : new Error("Gagal memuat metadata tong."),
-      );
-    });
-
-  const unsubscribe = onValue(
-    ref(requireRealtimeDb()),
+  const unsubscribeMetadata = onSnapshot(
+    binsQuery,
     (snapshot) => {
       if (!active) {
         return;
       }
 
-      latestReadings = parseRealtimeBinReadings(snapshot.val());
-      onData(mergeBinsWithRealtimeReadings(metadataBins, latestReadings));
+      metadataBins = snapshot.docs.map((item) => ({
+        id: item.id,
+        ...(item.data() as Omit<WasteBinRecord, "id">),
+      }));
+      emitMergedBins();
     },
     (error) => {
-      void getBinMetadata()
-        .then((bins) => {
-          onData(bins);
-        })
-        .catch(() => {
-          onError?.(error);
-        });
+      onError?.(
+        error instanceof Error ? error : new Error("Gagal memuat metadata tong."),
+      );
     },
   );
 
+  const unsubscribeRealtime = isRealtimeDatabaseConfigured
+    ? onValue(
+        ref(requireRealtimeDb()),
+        (snapshot) => {
+          if (!active) {
+            return;
+          }
+
+          latestReadings = parseRealtimeBinReadings(snapshot.val());
+          emitMergedBins();
+        },
+        (error) => {
+          emitMergedBins();
+          onError?.(error);
+        },
+      )
+    : () => undefined;
+
   return () => {
     active = false;
-    unsubscribe();
+    unsubscribeMetadata();
+    unsubscribeRealtime();
   };
 }
 

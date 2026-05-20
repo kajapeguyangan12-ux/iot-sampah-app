@@ -10,7 +10,7 @@ import {
 import {
   createBin,
   deleteBin,
-  getBins,
+  subscribeBins,
   updateBin,
   updateBinRealtimeMapping,
 } from "@/lib/firestore";
@@ -46,40 +46,35 @@ export default function AdminBinsPage() {
   );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadBins();
-    }, 0);
+    const unsubscribe = subscribeBins(
+      (nextBins) => {
+        setBins(nextBins);
+        setMappingDrafts((prev) => {
+          const nextDrafts = { ...prev };
 
-    return () => window.clearTimeout(timer);
+          for (const bin of nextBins) {
+            nextDrafts[bin.id] ??= {
+              deviceId: bin.deviceId,
+              realtimeKey: bin.realtimeKey ?? "",
+            };
+          }
+
+          return nextDrafts;
+        });
+        setLoading(false);
+      },
+      (nextError) => {
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Gagal memuat data tong.",
+        );
+        setLoading(false);
+      },
+    );
+
+    return unsubscribe;
   }, []);
-
-  async function loadBins() {
-    setLoading(true);
-    setError("");
-
-    try {
-      const nextBins = await getBins();
-      setBins(nextBins);
-      setMappingDrafts((prev) => {
-        const nextDrafts = { ...prev };
-
-        for (const bin of nextBins) {
-          nextDrafts[bin.id] ??= {
-            deviceId: bin.deviceId,
-            realtimeKey: bin.realtimeKey ?? "",
-          };
-        }
-
-        return nextDrafts;
-      });
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "Gagal memuat data tong.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
 
   function resetForm() {
     setForm(initialForm);
@@ -130,7 +125,6 @@ export default function AdminBinsPage() {
       }
 
       resetForm();
-      await loadBins();
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -150,7 +144,6 @@ export default function AdminBinsPage() {
       if (editingBinId === binId) {
         resetForm();
       }
-      await loadBins();
     } catch (nextError) {
       setError(
         nextError instanceof Error ? nextError.message : "Gagal menghapus tong.",
@@ -170,7 +163,6 @@ export default function AdminBinsPage() {
 
     try {
       await updateBinRealtimeMapping(binId, draft);
-      await loadBins();
     } catch (nextError) {
       setError(
         nextError instanceof Error
