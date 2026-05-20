@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 
+import { SensorActivityBadge } from "@/components/sensor-activity-badge";
 import { StatusBadge } from "@/components/status-badge";
+import { useCurrentTime } from "@/hooks/use-current-time";
 import {
   deriveBinStatusFromFillPercent,
   getBinStatusLabel,
@@ -14,6 +16,7 @@ import {
   updateBin,
   updateBinRealtimeMapping,
 } from "@/lib/firestore";
+import { formatSensorLastSeen } from "@/lib/sensor-health";
 import type { BinStatus, WasteBin } from "@/types/domain";
 
 const initialForm = {
@@ -38,6 +41,7 @@ export default function AdminBinsPage() {
   const [saving, setSaving] = useState(false);
   const [mappingSavingId, setMappingSavingId] = useState("");
   const [error, setError] = useState("");
+  const now = useCurrentTime();
   const [mappingDrafts, setMappingDrafts] = useState<
     Record<string, { deviceId: string; realtimeKey: string }>
   >({});
@@ -384,6 +388,7 @@ export default function AdminBinsPage() {
                   <th className="pb-3 font-medium">Device</th>
                   <th className="pb-3 font-medium">RTDB Key</th>
                   <th className="pb-3 font-medium">Area</th>
+                  <th className="pb-3 font-medium">Sensor</th>
                   <th className="pb-3 font-medium">Status</th>
                   <th className="pb-3 font-medium">Aksi</th>
                 </tr>
@@ -428,6 +433,14 @@ export default function AdminBinsPage() {
                       />
                     </td>
                     <td className="py-3">{bin.area}</td>
+                    <td className="py-3">
+                      <div className="grid gap-2">
+                        <SensorActivityBadge lastUpdate={bin.lastUpdate} now={now} />
+                        <p className="text-xs text-foreground/60">
+                          {formatSensorLastSeen(bin.lastUpdate, now)}
+                        </p>
+                      </div>
+                    </td>
                     <td className="py-3">
                       <StatusBadge status={bin.status} />
                     </td>

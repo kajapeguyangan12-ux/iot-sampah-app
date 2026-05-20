@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 
 import { BinMap } from "@/components/bin-map";
+import { SensorActivityBadge } from "@/components/sensor-activity-badge";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
+import { useCurrentTime } from "@/hooks/use-current-time";
 import { formatDateTime } from "@/lib/format";
 import { getUsers, subscribeBins, subscribeSensorLogs } from "@/lib/firestore";
+import { formatSensorLastSeen, getSensorActivity } from "@/lib/sensor-health";
 import type { AppUser, SensorLog, WasteBin } from "@/types/domain";
 
 export default function AdminDashboardPage() {
@@ -15,6 +18,7 @@ export default function AdminDashboardPage() {
   const [logs, setLogs] = useState<SensorLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const now = useCurrentTime();
 
   useEffect(() => {
     let active = true;
@@ -92,6 +96,9 @@ export default function AdminDashboardPage() {
 
   const fullBins = bins.filter((bin) => bin.status === "penuh").length;
   const warningBins = bins.filter((bin) => bin.status === "setengah").length;
+  const offlineSensors = bins.filter(
+    (bin) => !getSensorActivity(bin.lastUpdate, now).isOnline,
+  ).length;
   const priorityBins = [...bins]
     .sort((left, right) => right.fillPercent - left.fillPercent)
     .slice(0, 4);
@@ -152,6 +159,12 @@ export default function AdminDashboardPage() {
             detail="Akun admin dan petugas yang tercatat."
             accent="neutral"
           />
+          <StatCard
+            label="Sensor Offline"
+            value={`${offlineSensors}`}
+            detail="Masih tampilkan data terakhir, tapi sensor tidak update."
+            accent="danger"
+          />
         </div>
       </section>
 
@@ -205,11 +218,15 @@ export default function AdminDashboardPage() {
                       </p>
                       <p className="text-sm text-foreground/60">{bin.area}</p>
                     </div>
-                    <StatusBadge status={bin.status} />
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <SensorActivityBadge lastUpdate={bin.lastUpdate} now={now} />
+                      <StatusBadge status={bin.status} />
+                    </div>
                   </div>
                   <div className="mt-3 grid gap-1 text-sm text-foreground/72">
                     <p>Kapasitas saat ini: {bin.fillPercent}%</p>
                     <p>Pembaruan terakhir: {formatDateTime(bin.lastUpdate)}</p>
+                    <p>{formatSensorLastSeen(bin.lastUpdate, now)}</p>
                     <p>{bin.note}</p>
                   </div>
                 </article>

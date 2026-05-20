@@ -5,11 +5,14 @@ import { useEffect, useState } from "react";
 
 import { BinMap } from "@/components/bin-map";
 import { useAuth } from "@/components/providers/auth-provider";
+import { SensorActivityBadge } from "@/components/sensor-activity-badge";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
 import { deriveBinStatusFromFillPercent } from "@/lib/bin-status";
 import { formatDateTime } from "@/lib/format";
 import { subscribeBins } from "@/lib/firestore";
+import { formatSensorLastSeen, getSensorActivity } from "@/lib/sensor-health";
+import { useCurrentTime } from "@/hooks/use-current-time";
 import type { WasteBin } from "@/types/domain";
 
 type ReportForm = {
@@ -37,6 +40,7 @@ export function PublicMonitoringPage() {
   const [reportMessage, setReportMessage] = useState("");
   const [reportError, setReportError] = useState("");
   const [reportForm, setReportForm] = useState<ReportForm>(initialReportForm);
+  const now = useCurrentTime();
 
   useEffect(() => {
     let active = true;
@@ -132,6 +136,9 @@ export function PublicMonitoringPage() {
     (bin) => bin.status === "setengah",
   ).length;
   const emptyBins = normalizedBins.filter((bin) => bin.status === "kosong").length;
+  const offlineSensors = normalizedBins.filter(
+    (bin) => !getSensorActivity(bin.lastUpdate, now).isOnline,
+  ).length;
   const averageFill = bins.length
     ? Math.round(
         bins.reduce((total, bin) => total + bin.fillPercent, 0) / bins.length,
@@ -242,6 +249,12 @@ export function PublicMonitoringPage() {
             detail={`${emptyBins} tong masih tergolong kosong atau aman.`}
             accent="brand"
           />
+          <StatCard
+            label="Sensor Offline"
+            value={`${offlineSensors}`}
+            detail="Data terakhir masih tampil, tapi perangkat sedang diam."
+            accent="danger"
+          />
         </div>
       </section>
 
@@ -296,11 +309,15 @@ export function PublicMonitoringPage() {
                       </p>
                       <p className="text-sm text-foreground/60">{bin.area}</p>
                     </div>
-                    <StatusBadge status={bin.status} />
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <SensorActivityBadge lastUpdate={bin.lastUpdate} now={now} />
+                      <StatusBadge status={bin.status} />
+                    </div>
                   </div>
                   <div className="mt-3 grid gap-1 text-sm text-foreground/72">
                     <p>Persentase isi: {bin.fillPercent}%</p>
                     <p>Pembaruan terakhir: {formatDateTime(bin.lastUpdate)}</p>
+                    <p>{formatSensorLastSeen(bin.lastUpdate, now)}</p>
                     <p>{bin.note}</p>
                   </div>
                 </article>

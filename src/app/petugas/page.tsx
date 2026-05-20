@@ -6,11 +6,14 @@ import { useEffect, useState } from "react";
 import { BinMap } from "@/components/bin-map";
 import { useAuth } from "@/components/providers/auth-provider";
 import { RoleGate } from "@/components/role-gate";
+import { SensorActivityBadge } from "@/components/sensor-activity-badge";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
+import { useCurrentTime } from "@/hooks/use-current-time";
 import { statusOrder } from "@/lib/demo-data";
 import { formatDateTime } from "@/lib/format";
 import { subscribeBins } from "@/lib/firestore";
+import { formatSensorLastSeen, getSensorActivity } from "@/lib/sensor-health";
 import type { WasteBin } from "@/types/domain";
 
 export default function OfficerPage() {
@@ -26,6 +29,7 @@ function OfficerDashboard() {
   const [bins, setBins] = useState<WasteBin[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const now = useCurrentTime();
   const hasValidCoordinates = (bin: WasteBin) =>
     Number.isFinite(bin.lat) && Number.isFinite(bin.lng);
 
@@ -57,6 +61,9 @@ function OfficerDashboard() {
   const urgentBins = sortedBins.filter((bin) => bin.status === "penuh").length;
   const onWatchBins = sortedBins.filter((bin) => bin.status === "setengah").length;
   const readyBins = sortedBins.filter((bin) => bin.status === "kosong").length;
+  const offlineSensors = sortedBins.filter(
+    (bin) => !getSensorActivity(bin.lastUpdate, now).isOnline,
+  ).length;
   const nearestAction = sortedBins[0];
 
   return (
@@ -119,6 +126,12 @@ function OfficerDashboard() {
             }
             accent="neutral"
           />
+          <StatCard
+            label="Sensor Offline"
+            value={`${offlineSensors}`}
+            detail="Tetap pakai data terakhir, tapi perangkat belum update."
+            accent="danger"
+          />
         </div>
       </header>
 
@@ -176,12 +189,16 @@ function OfficerDashboard() {
                     </p>
                     <p className="text-sm text-foreground/60">{bin.address}</p>
                   </div>
-                  <StatusBadge status={bin.status} />
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <SensorActivityBadge lastUpdate={bin.lastUpdate} now={now} />
+                    <StatusBadge status={bin.status} />
+                  </div>
                 </div>
                 <div className="mt-4 grid gap-2 text-sm text-foreground/72">
                   <p>Kode tong: {bin.code}</p>
                   <p>Kapasitas: {bin.fillPercent}%</p>
                   <p>Pembaruan terakhir: {formatDateTime(bin.lastUpdate)}</p>
+                  <p>{formatSensorLastSeen(bin.lastUpdate, now)}</p>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-3">
                   {hasValidCoordinates(bin) ? (
