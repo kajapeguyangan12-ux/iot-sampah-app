@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useAuth } from "@/components/providers/auth-provider";
+import { subscribePublicReports } from "@/lib/firestore";
+import type { PublicReport } from "@/types/domain";
 
 const navItems = [
   { href: "/admin", label: "Dashboard", code: "01" },
@@ -15,6 +18,22 @@ const navItems = [
 export function AdminSidebar() {
   const pathname = usePathname();
   const { profile, logout } = useAuth();
+  const [reports, setReports] = useState<PublicReport[]>([]);
+
+  useEffect(() => {
+    const unsubscribe = subscribePublicReports(
+      (nextReports) => {
+        setReports(nextReports);
+      },
+      () => {
+        setReports([]);
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const newReports = reports.filter((report) => report.status === "baru").length;
 
   return (
     <aside className="xl:sticky xl:top-6 xl:self-start">
@@ -57,6 +76,17 @@ export function AdminSidebar() {
                     {item.code}
                   </span>
                   <span>{item.label}</span>
+                  {item.href === "/admin/laporan" && newReports > 0 ? (
+                    <span
+                      className={`inline-flex min-w-8 items-center justify-center rounded-full px-2 py-1 text-[11px] font-bold ${
+                        active
+                          ? "bg-danger text-white"
+                          : "bg-[#f3d39a] text-[#143f30]"
+                      }`}
+                    >
+                      {newReports}
+                    </span>
+                  ) : null}
                 </span>
                 <span
                   className={`h-2.5 w-2.5 rounded-full ${

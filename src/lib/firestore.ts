@@ -45,6 +45,13 @@ type ManagedUserInput = {
   area: string;
   role: AppUser["role"];
 };
+type PublicReportInput = {
+  reporterName?: string;
+  phone?: string;
+  binId?: string;
+  locationName: string;
+  details: string;
+};
 type WasteBinRecord = WasteBin & {
   realtimeKey?: string;
 };
@@ -635,21 +642,64 @@ export async function getPublicReports(): Promise<PublicReport[]> {
     query(collection(db, "public_reports"), orderBy("submittedAt", "desc")),
   );
 
-  return snapshot.docs.map((item) => {
-    const data = item.data() as Partial<PublicReport>;
+  return snapshot.docs.map((item) => mapPublicReport(item.id, item.data()));
+}
 
-    return {
-      id: item.id,
-      reporterName: data.reporterName ?? null,
-      phone: data.phone ?? null,
-      binId: data.binId ?? null,
-      locationName: data.locationName ?? "Lokasi belum diisi",
-      details: data.details ?? "",
-      source: data.source ?? "public-monitoring",
-      status: data.status ?? "baru",
-      submittedAt: data.submittedAt ?? new Date().toISOString(),
-    } satisfies PublicReport;
+export async function createPublicReport(input: PublicReportInput) {
+  const db = requireDb();
+
+  await addDoc(collection(db, "public_reports"), {
+    reporterName: input.reporterName?.trim() || null,
+    phone: input.phone?.trim() || null,
+    binId: input.binId?.trim() || null,
+    locationName: input.locationName.trim(),
+    details: input.details.trim(),
+    source: "public-monitoring",
+    status: "baru",
+    createdAt: serverTimestamp(),
+    submittedAt: new Date().toISOString(),
   });
+}
+
+function mapPublicReport(id: string, value: unknown): PublicReport {
+  const data = (value ?? {}) as Partial<PublicReport>;
+
+  return {
+    id,
+    reporterName: data.reporterName ?? null,
+    phone: data.phone ?? null,
+    binId: data.binId ?? null,
+    locationName: data.locationName ?? "Lokasi belum diisi",
+    details: data.details ?? "",
+    source: data.source ?? "public-monitoring",
+    status: data.status ?? "baru",
+    submittedAt: data.submittedAt ?? new Date().toISOString(),
+  } satisfies PublicReport;
+}
+
+export function subscribePublicReports(
+  onData: (reports: PublicReport[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  const db = requireDb();
+  const reportsQuery = query(
+    collection(db, "public_reports"),
+    orderBy("submittedAt", "desc"),
+  );
+
+  return onSnapshot(
+    reportsQuery,
+    (snapshot) => {
+      onData(snapshot.docs.map((item) => mapPublicReport(item.id, item.data())));
+    },
+    (error) => {
+      onError?.(
+        error instanceof Error
+          ? error
+          : new Error("Gagal memuat laporan masyarakat realtime."),
+      );
+    },
+  );
 }
 
 export async function updatePublicReportStatus(

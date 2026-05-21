@@ -8,14 +8,20 @@ import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
 import { useCurrentTime } from "@/hooks/use-current-time";
 import { formatDateTime } from "@/lib/format";
-import { getUsers, subscribeBins, subscribeSensorLogs } from "@/lib/firestore";
+import {
+  getUsers,
+  subscribeBins,
+  subscribePublicReports,
+  subscribeSensorLogs,
+} from "@/lib/firestore";
 import { formatSensorLastSeen, getSensorActivity } from "@/lib/sensor-health";
-import type { AppUser, SensorLog, WasteBin } from "@/types/domain";
+import type { AppUser, PublicReport, SensorLog, WasteBin } from "@/types/domain";
 
 export default function AdminDashboardPage() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [bins, setBins] = useState<WasteBin[]>([]);
   const [logs, setLogs] = useState<SensorLog[]>([]);
+  const [reports, setReports] = useState<PublicReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const now = useCurrentTime();
@@ -87,27 +93,58 @@ export default function AdminDashboardPage() {
       },
     );
 
+    const unsubscribeReports = subscribePublicReports(
+      (nextReports) => {
+        if (!active) {
+          return;
+        }
+
+        setReports(nextReports);
+      },
+      (nextError) => {
+        if (!active) {
+          return;
+        }
+
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Gagal memuat laporan masyarakat realtime.",
+        );
+      },
+    );
+
     return () => {
       active = false;
       unsubscribeBins();
       unsubscribeLogs();
+      unsubscribeReports();
     };
   }, []);
 
+  useEffect(() => {
+    const newReportsCount = reports.filter((report) => report.status === "baru").length;
+    const baseTitle = "Admin | Eco-Smart Bin Grid";
+
+    document.title =
+      newReportsCount > 0 ? `(${newReportsCount}) ${baseTitle}` : baseTitle;
+
+    return () => {
+      document.title = baseTitle;
+    };
+  }, [reports]);
+
   const fullBins = bins.filter((bin) => bin.status === "penuh").length;
   const warningBins = bins.filter((bin) => bin.status === "setengah").length;
+  const newReports = reports.filter((report) => report.status === "baru");
+  const processingReports = reports.filter((report) => report.status === "diproses");
   const offlineSensors = bins.filter(
     (bin) => !getSensorActivity(bin.lastUpdate, now).isOnline,
   ).length;
   const priorityBins = [...bins]
     .sort((left, right) => right.fillPercent - left.fillPercent)
     .slice(0, 4);
-  const areaSummary = Object.entries(
-    bins.reduce<Record<string, number>>((carry, bin) => {
-      carry[bin.area] = (carry[bin.area] ?? 0) + 1;
-      return carry;
-    }, {}),
-  ).sort((left, right) => right[1] - left[1]);
+  const latestReport = reports[0] ?? null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -164,6 +201,16 @@ export default function AdminDashboardPage() {
             value={`${offlineSensors}`}
             detail="Masih tampilkan data terakhir, tapi sensor tidak update."
             accent="danger"
+          />
+          <StatCard
+            label="Laporan Baru"
+            value={`${newReports.length}`}
+            detail={
+              latestReport
+                ? `Terakhir masuk ${formatDateTime(latestReport.submittedAt)}.`
+                : "Belum ada laporan publik yang menunggu."
+            }
+            accent={newReports.length ? "danger" : "neutral"}
           />
         </div>
       </section>
@@ -239,51 +286,62 @@ export default function AdminDashboardPage() {
             </div>
           </section>
 
-          <section className="glass-panel rounded-[2rem] border border-line p-6 md:p-8">
+          <section
+            className={`rounded-[2rem] border p-6 md:p-8 ${
+              newReports.length
+                ? "border-danger/20 bg-danger/10"
+                : "border-brand/10 bg-brand/6"
+            }`}
+          >
             <div className="mb-5">
-              <div>
-                <p className="text-sm uppercase tracking-[0.2em] text-brand">
-                  Area
-                </p>
-                <h2 className="mt-3 text-2xl font-semibold text-brand-strong">
-                  Sebaran tong per wilayah
-                </h2>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-sm uppercase tracking-[0.2em] text-brand">
+                    Peringatan Laporan
+                  </p>
+                  <h2 className="mt-3 text-2xl font-semibold text-brand-strong">
+                    {newReports.length
+                      ? `${newReports.length} laporan baru perlu dilihat sekarang`
+                      : "Belum ada laporan baru yang menunggu tindakan"}
+                  </h2>
+                </div>
+                <div className="rounded-[1.4rem] border border-white/60 bg-white/75 px-4 py-3 text-sm text-foreground/72">
+                  <p>Total laporan baru: {newReports.length}</p>
+                  <p>Sedang diproses: {processingReports.length}</p>
+                </div>
               </div>
             </div>
-            <div className="space-y-3">
-              {areaSummary.map(([area, count]) => (
-                <div
-                  key={area}
-                  className="rounded-[1.4rem] border border-line bg-white p-4"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-semibold text-brand-strong">{area}</p>
-                    <span className="text-sm text-foreground/60">
-                      {count} tong
+            {latestReport ? (
+              <div className="space-y-3">
+                <article className="rounded-[1.5rem] border border-line bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-brand-strong">
+                        {latestReport.locationName}
+                      </p>
+                      <p className="text-sm text-foreground/60">
+                        {formatDateTime(latestReport.submittedAt)}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-danger/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-danger">
+                      {latestReport.status}
                     </span>
                   </div>
-                  <div className="mt-3 h-2 rounded-full bg-[#eee5d4]">
-                    <div
-                      className="h-2 rounded-full bg-brand"
-                      style={{
-                        width: `${Math.max(
-                          14,
-                          Math.min(
-                            100,
-                            Math.round((count / Math.max(bins.length, 1)) * 100),
-                          ),
-                        )}%`,
-                      }}
-                    />
+                  <div className="mt-3 grid gap-1 text-sm text-foreground/72">
+                    <p>Pelapor: {latestReport.reporterName || "Anonim"}</p>
+                    <p>Kontak: {latestReport.phone || "-"}</p>
+                    <p>Tong terkait: {latestReport.binId || "-"}</p>
                   </div>
-                </div>
-              ))}
-              {!areaSummary.length ? (
-                <div className="rounded-[1.5rem] border border-line bg-white p-5 text-sm text-foreground/60">
-                  Sebaran area belum tersedia.
-                </div>
-              ) : null}
-            </div>
+                  <div className="mt-4 rounded-[1.25rem] border border-line bg-surface px-4 py-4 text-sm text-foreground/78">
+                    {latestReport.details}
+                  </div>
+                </article>
+              </div>
+            ) : (
+              <div className="rounded-[1.5rem] border border-line bg-white p-5 text-sm text-foreground/65">
+                Belum ada laporan masyarakat yang tercatat.
+              </div>
+            )}
           </section>
         </div>
       </section>

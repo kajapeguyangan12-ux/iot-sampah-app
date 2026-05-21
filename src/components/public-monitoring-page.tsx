@@ -1,5 +1,6 @@
 "use client";
 
+import { signInWithEmailAndPassword } from "firebase/auth";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -8,9 +9,10 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { SensorActivityBadge } from "@/components/sensor-activity-badge";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
+import { firebaseAuth } from "@/lib/firebase";
 import { deriveBinStatusFromFillPercent } from "@/lib/bin-status";
 import { formatDateTime } from "@/lib/format";
-import { subscribeBins } from "@/lib/firestore";
+import { createPublicReport, findUserByUsername, subscribeBins } from "@/lib/firestore";
 import { formatSensorLastSeen, getSensorActivity } from "@/lib/sensor-health";
 import { useCurrentTime } from "@/hooks/use-current-time";
 import type { WasteBin } from "@/types/domain";
@@ -30,9 +32,12 @@ const initialReportForm: ReportForm = {
   locationName: "",
   details: "",
 };
+const GUEST_USERNAME = process.env.NEXT_PUBLIC_GUEST_USERNAME ?? "tamu";
+const GUEST_PASSWORD = process.env.NEXT_PUBLIC_GUEST_PASSWORD ?? "123456";
+const GUEST_EMAIL = process.env.NEXT_PUBLIC_GUEST_EMAIL ?? "";
 
 export function PublicMonitoringPage() {
-  const { profile, logout } = useAuth();
+  const { profile, logout, authUser } = useAuth();
   const [bins, setBins] = useState<WasteBin[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -148,6 +153,27 @@ export function PublicMonitoringPage() {
     .sort((left, right) => right.fillPercent - left.fillPercent)
     .slice(0, 6);
 
+  async function submitReportFromClient() {
+    if (!firebaseAuth) {
+      throw new Error("Firebase Auth belum dikonfigurasi untuk laporan publik.");
+    }
+
+    if (!authUser && !firebaseAuth.currentUser) {
+      const guestAccount = await findUserByUsername(GUEST_USERNAME).catch(() => null);
+      const guestEmail = guestAccount?.email || GUEST_EMAIL;
+
+      if (!guestEmail) {
+        throw new Error(
+          "Akun publik Firebase belum bisa dipakai. Isi NEXT_PUBLIC_GUEST_EMAIL atau pastikan user tamu ada di koleksi users.",
+        );
+      }
+
+      await signInWithEmailAndPassword(firebaseAuth, guestEmail, GUEST_PASSWORD);
+    }
+
+    await createPublicReport(reportForm);
+  }
+
   async function handleSubmitReport(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSending(true);
@@ -177,11 +203,28 @@ export function PublicMonitoringPage() {
       );
       setReportForm(initialReportForm);
     } catch (nextError) {
-      setReportError(
+      const message =
         nextError instanceof Error
           ? nextError.message
-          : "Laporan gagal dikirim.",
-      );
+          : "Laporan gagal dikirim.";
+
+      if (message.includes("Firebase Admin belum dikonfigurasi")) {
+        try {
+          await submitReportFromClient();
+          setReportMessage("Laporan berhasil dikirim. Terima kasih sudah membantu monitoring.");
+          setReportForm(initialReportForm);
+          return;
+        } catch (fallbackError) {
+          setReportError(
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Laporan gagal dikirim.",
+          );
+          return;
+        }
+      }
+
+      setReportError(message);
     } finally {
       setSending(false);
     }
